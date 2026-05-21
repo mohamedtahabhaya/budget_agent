@@ -50,6 +50,18 @@ class TransactionModel(Base):
     merchant = Column(String)
     note = Column(String, default="")
 
+class SavingsGoalModel(Base):
+    __tablename__ = "savings_goals"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String, index=True)
+    name = Column(String)
+    category = Column(String)
+    target = Column(Float)
+    current = Column(Float, default=0.0)
+    target_date = Column(String)
+    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+
 Base.metadata.create_all(bind=engine)
     
 db = SessionLocal()

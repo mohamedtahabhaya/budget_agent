@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 from groq import Groq
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
-from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel
+from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel, SavingsGoalModel
 from datetime import datetime
 from sqlalchemy import func, desc
 
@@ -65,8 +65,7 @@ def delete_transaction(transaction_id: int) -> str:
         if not tx: return f"Error: Transaction {transaction_id} not found."
         
         account = db.query(AccountModel).filter(AccountModel.slug == tx.account_slug).first()
-        if account:
-            account.balance += tx.amount
+        if account:account.balance += tx.amount
             
         db.delete(tx)
         db.commit()
@@ -83,13 +82,13 @@ class CategorizeSchema(BaseModel):
 
 @tool(args_schema=CategorizeSchema)
 def categorize(workspace_id: str, category_name: str) -> str:
-    """Map a raw category name to a valid database category ID. Returns only the ID string."""
+    """Map a raw category name to a valid database category ID."""
     db = SessionLocal()
     try:
         categories = db.query(CategoryModel).filter(CategoryModel.workspace_id == workspace_id).all()
         cat_list = ", ".join([f"{c.name} (ID: {c.id})" for c in categories])
         llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
-        prompt = f"Category list: [{cat_list}]. Match: '{category_name}'. Return ONLY the technical ID (e.g. cat_groceries)."
+        prompt = f"Category list: [{cat_list}]. Match: '{category_name}'. Return ONLY the technical ID."
         response = llm.invoke(prompt)
         return response.content.strip()
     finally:
@@ -132,7 +131,7 @@ class CreateTransactionSchema(BaseModel):
 
 @tool(args_schema=CreateTransactionSchema)
 def create_transaction(account_slug: str, amount: float, date: str, merchant: str, category_id: str, paid_by: str, note: str = "") -> str:
-    """Record a transaction. amount: POSITIVE for expense, NEGATIVE for income."""
+    """Record a transaction. amount MUST be a number. POSITIVE for expense, NEGATIVE for income."""
     db = SessionLocal()
     try:
         if not category_id.startswith("cat_"):
@@ -152,6 +151,66 @@ def create_transaction(account_slug: str, amount: float, date: str, merchant: st
     except Exception as e:
         db.rollback()
         return f"Error: {str(e)}"
+    finally:
+        db.close()
+
+class CreateSavingsGoalSchema(BaseModel):
+    workspace_id: str
+    name: str
+    target: float
+    target_date: str
+    category: Optional[str] = "General"
+
+@tool(args_schema=CreateSavingsGoalSchema)
+def create_savings_goal(workspace_id: str, name: str, target: float, target_date: str, category: str = "General") -> str:
+    """Create a new savings goal. target MUST be a number."""
+    db = SessionLocal()
+    try:
+        goal = SavingsGoalModel(workspace_id=workspace_id, name=name, target=target, target_date=target_date, category=category)
+        db.add(goal)
+        db.commit()
+        return f"Goal '{name}' created: {target} MAD by {target_date}."
+    finally:
+        db.close()
+
+@tool
+def list_savings_goals(workspace_id: str) -> str:
+    """List all savings goals and progress."""
+    db = SessionLocal()
+    try:
+        goals = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id).all()
+        if not goals: return "No goals found."
+        output = "Savings Goals:\n"
+        for g in goals:
+            pct = (g.current / g.target) * 100
+            output += f"- {g.name} (ID: {g.id}): {g.current}/{g.target} MAD ({pct:.1f}%)\n"
+        return output
+    finally:
+        db.close()
+
+class UpdateSavingsGoalSchema(BaseModel):
+    workspace_id: str
+    amount: float
+    goal_id: Optional[int] = None
+    goal_name: Optional[str] = None
+
+@tool(args_schema=UpdateSavingsGoalSchema)
+def update_savings_goal(workspace_id: str, amount: float, goal_id: Optional[int] = None, goal_name: Optional[str] = None) -> str:
+    """Add money to a goal by ID or name. amount MUST be a number."""
+    db = SessionLocal()
+    try:
+        query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
+        if goal_id:
+            goal = query.filter(SavingsGoalModel.id == goal_id).first()
+        elif goal_name:
+            goal = query.filter(SavingsGoalModel.name.ilike(f"%{goal_name}%")).first()
+        else:
+            return "Error: Provide goal_id or goal_name."
+            
+        if not goal: return "Error: Goal not found."
+        goal.current += amount
+        db.commit()
+        return f"Updated {goal.name}: {goal.current}/{goal.target} MAD."
     finally:
         db.close()
 
@@ -211,6 +270,6 @@ def transfer(source_slug: str, dest_slug: str, amount: float) -> str:
     finally:
         db.close()
 
-data_tools = [create_transaction, transcribe_audio, categorize, check_budget, get_balances, list_recent_transactions, delete_transaction]
-analyst_tools = [list_accounts, transfer, check_budget, get_balances, list_recent_transactions]
+data_tools = [create_transaction, transcribe_audio, categorize, check_budget, get_balances, list_recent_transactions, delete_transaction, create_savings_goal, list_savings_goals, update_savings_goal]
+analyst_tools = [list_accounts, transfer, check_budget, get_balances, list_recent_transactions, list_savings_goals]
 budget_tools = data_tools + analyst_tools

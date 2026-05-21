@@ -28,35 +28,35 @@ def create_agent(llm, tools, system_prompt, agent_name):
 data_prompt = """You are the Data Entry Expert. 
 
 WORKFLOWS:
-1. NEW EXPENSE: call 'categorize' -> 'create_transaction' -> 'get_balances'.
-2. TRANSFER: call 'transfer' -> 'get_balances'.
-3. CORRECTION: call 'list_recent_transactions' -> 'delete_transaction' -> 'get_balances'.
+1. EXPENSES: 'categorize' -> 'create_transaction' -> 'get_balances'.
+2. SAVINGS GOALS: 'create_savings_goal' or 'update_savings_goal'.
 
-PROACTIVE RULES:
-- DEFAULT ACCOUNT: Use 'main_current' if the user doesn't specify an account for transfers or expenses.
-- ACTION FIRST: Don't ask questions if you can infer the data. Call the tools first.
-- NO MATH: Always use tool results.
-- LANGUAGE: Match the user's language.
+CRITICAL: 
+- Check the ENTIRE conversation history for goal names, targets, and dates. 
+- If the user already provided "buying a house" or "300000" in previous messages, USE THEM. 
+- Do NOT ask for information that is already in the history.
+- LANGUAGE: ALWAYS respond in the user's language (English if they speak English).
 """
 
 analyst_prompt = """You are the Financial Analyst. 
-1. Always call 'get_balances' and 'check_budget' to provide real data.
-2. If a user provides a short answer, check if it's related to a previous question.
+1. Always call 'get_balances' or 'list_savings_goals' to provide real data.
+2. Respond in the user's language.
 """
 
-general_prompt = """You are the Concierge. Only for greetings and small talk. 
-If user wants to log, check balance, or transfer, say you're connecting them to the expert."""
+general_prompt = """You are the Concierge. 
+- ONLY for greetings. 
+- NEVER ask about amounts, accounts, or goal names. 
+- If user wants to do anything financial, say: "I'm routing you to my specialist teammate." and STOP."""
 
 supervisor_prompt = """You are the Supervisor. 
 
 ROUTING RULES:
-1. Short answers (e.g. "from main", "yes", "500") -> Route back to the agent that was previously active (check the history).
-2. Any mention of adding money, spending, receipts, transfers, or income -> 'data_agent'.
-3. Any question about current balance or budget status -> 'analyst_agent'.
-4. Greetings/jokes only -> 'general_agent'.
-5. Task finished -> 'FINISH'.
+1. Mention of money, goal names (e.g. "buying a house"), targets, or amounts -> 'data_agent'.
+2. Questions about balance, budget, or progress -> 'analyst_agent'.
+3. Greetings only -> 'general_agent'.
+4. Task finished -> 'FINISH'.
 
-Respond ONLY with the name."""
+Respond ONLY with the agent name."""
 
 data_agent_node = create_agent(llm, data_tools, data_prompt, "data_agent")
 analyst_agent_node = create_agent(llm, analyst_tools, analyst_prompt, "analyst_agent")
