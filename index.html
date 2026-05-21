@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My AI Agent</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .chat-container { background: white; width: 100%; max-width: 500px; height: 80vh; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
+        .chat-header { background: #007bff; color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2em; }
+        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { max-width: 80%; padding: 12px 16px; border-radius: 15px; line-height: 1.4; }
+        .message.user { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
+        .message.bot { background: #e9ecef; color: black; align-self: flex-start; border-bottom-left-radius: 4px; white-space: pre-wrap;}
+        .loading { font-style: italic; color: #6c757d; font-size: 0.9em; align-self: flex-start; display: none; }
+        .chat-input-area { display: flex; padding: 15px; border-top: 1px solid #dee2e6; background: #fff; }
+        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ced4da; border-radius: 20px; outline: none; font-size: 1em; }
+        button { background: #007bff; color: white; border: none; padding: 0 20px; margin-left: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
+        button:hover { background: #0056b3; }
+        .status-badge {
+            display: none;
+            background-color: #ffc107;
+            color: #856404;
+            font-size: 0.85em;
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            width: fit-content;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.7; }
+            50% { opacity: 1; }
+            100% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header"> AI Agent Custom</div>
+    <div class="chat-messages" id="chat-messages">
+        <div class="message bot">Hi ! Ask me a question.</div>
+        <div class="loading" id="loading">Thinking...</div>
+    </div>
+    <div class="chat-input-area">
+        <button id="mic-btn" onclick="startDictation()" style="background: #28a745; margin-right: 10px; padding: 0 15px; font-size: 1.2em;">🎤</button>
+        
+        <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
+        <button id="upload-btn" onclick="document.getElementById('image-upload').click()" style="background: #6c757d; margin-right: 10px; padding: 0 15px; font-size: 1.2em;">📎</button>
+        <span id="image-preview-text" style="display:none; align-self:center; margin-right:10px; color:#28a745; font-weight:bold;">🖼️ OK</span>
+
+        <input type="text" id="user-input" placeholder="Write your message or speak..." onkeypress="handleKeyPress(event)">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+</div>
+
+<script>
+    const maSessionUnique = "session_" + Date.now();
+    let currentBase64Image = null;
+
+    function handleImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            currentBase64Image = e.target.result; 
+            document.getElementById("image-preview-text").style.display = "inline-block";
+            console.log("Image chargée en mémoire !");
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function sendMessage() {
+        unlockAudio();
+        const inputField = document.getElementById("user-input");
+        const messageText = inputField.value.trim();
+        if (!messageText) return;
+
+        addMessage(messageText, "user");
+        inputField.value = "";
+        scrollToBottom();
+
+        let isApprov = false;
+        let textePropre = messageText.trim().toLowerCase();
+        
+        let contientOui = /\b(yes|oui|ok|go|vas-y|send|approuvé|approved|accept)\b/.test(textePropre);
+        let contientNon = /\b(no|non)\b/.test(textePropre);
+        
+        if (contientOui && !contientNon) {
+            isApprov = true;
+        }
+
+        const chatMessages = document.getElementById("chat-messages");
+        const loadingDiv = document.getElementById("loading");
+        
+        const aiBubble = document.createElement("div");
+        aiBubble.classList.add("message", "bot");
+
+        const aiStatus = document.createElement("div");
+        aiStatus.classList.add("status-badge");
+        aiBubble.appendChild(aiStatus);
+        
+        const aiContent = document.createElement("span");
+        aiContent.innerHTML = "<em>Thinking...</em>";
+        aiBubble.appendChild(aiContent);
+        
+        chatMessages.insertBefore(aiBubble, loadingDiv);
+        scrollToBottom();
+
+        try {
+            const response = await fetch("http://127.0.0.1:8000/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    message: messageText,
+                    session_id: maSessionUnique,
+                    is_approval: isApprov,
+                    image_data: currentBase64Image
+                })
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let rawMarkdown = "";
+            let sentenceBuffer = "";
+            
+            aiContent.innerHTML = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    if (sentenceBuffer.trim().length > 0) {
+                        speakText(sentenceBuffer);
+                    }
+                    break;
+                }
+
+                buffer += decoder.decode(value, { stream: true });
+                let parts = buffer.split("\n\n");
+                buffer = parts.pop(); 
+
+                for (let part of parts) {
+                    if (part.startsWith("data: ")) {
+                        try {
+                            let jsonStr = part.substring(6);
+                            let jsonData = JSON.parse(jsonStr);
+                            
+                            if (jsonData.type === "status") {
+                                if (jsonData.content === "done") {
+                                    aiStatus.style.display = "none";
+                                } else {
+                                    aiStatus.style.display = "block";
+                                    aiStatus.textContent = jsonData.content;
+                                    scrollToBottom();
+                                }
+                            } 
+                            else if (jsonData.type === "token" || jsonData.type === "approval") {
+                                rawMarkdown += jsonData.content;
+                                sentenceBuffer += jsonData.content;
+                                if (typeof marked !== 'undefined') {
+                                    aiContent.innerHTML = marked.parse(rawMarkdown);
+                                } else {
+                                    aiContent.innerHTML = rawMarkdown;
+                                }
+                                if (/[.?!:]/.test(jsonData.content) || jsonData.content.includes('\n')) {
+                                    if (sentenceBuffer.trim().length > 0) {
+                                        speakText(sentenceBuffer);
+                                        sentenceBuffer = "";
+                                    }
+                                }
+                            } else if (jsonData.type === "error") {
+                                aiContent.innerHTML += `<br><span style='color:red;'>Server Error: ${jsonData.content}</span>`;
+                            }
+                            scrollToBottom();
+                        } catch (parseError) {
+                            console.error("JSON Error:", parseError, "on part:", part);
+                        }
+                    }
+                }
+            }
+            currentBase64Image = null;
+            document.getElementById("image-preview-text").style.display = "none";
+            document.getElementById("image-upload").value = "";
+        } catch (error) {
+            console.error("Erreur Fetch:", error);
+            aiContent.innerHTML = "Erreur de connexion au serveur.";
+        }
+    }
+
+    function addMessage(text, sender) {
+        const messageDiv = document.createElement("div");
+        messageDiv.classList.add("message", sender);
+        messageDiv.textContent = text;
+        
+        const chatMessages = document.getElementById("chat-messages");
+        const loadingDiv = document.getElementById("loading");
+        
+        chatMessages.insertBefore(messageDiv, loadingDiv);
+        scrollToBottom();
+    }
+
+    function scrollToBottom() {
+        const chatMessages = document.getElementById("chat-messages");
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function handleKeyPress(event) {
+        if (event.key === "Enter") { sendMessage(); }
+    }
+
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const micBtn = document.getElementById('mic-btn');
+
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        
+        recognition.lang = 'en-US'; 
+        recognition.interimResults = false;
+        recognition.maxAlternatives = 1;
+
+        function startDictation() {
+            unlockAudio();
+            document.getElementById("user-input").value = "";
+            recognition.start();
+            micBtn.textContent = "🔴"; 
+            micBtn.style.background = "#dc3545"; 
+            document.getElementById("user-input").placeholder = "Listening...";
+        }
+
+        recognition.onresult = function(event) {
+            const transcript = event.results[0][0].transcript;
+            console.log("🗣️ Voix captée :", transcript);
+            
+            document.getElementById("user-input").value = transcript;
+        };
+
+        recognition.onerror = function(event) {
+            console.error("❌ Erreur Micro : ", event.error);
+        };
+
+        recognition.onend = function() {
+            console.log("🛑 Le micro s'est éteint.");
+            micBtn.textContent = "🎤";
+            micBtn.style.background = "#28a745";
+            document.getElementById("user-input").placeholder = "Write your message or speak...";
+            if (document.getElementById("user-input").value.trim() !== "") {
+                sendMessage(); 
+            }
+        };
+
+    } else {
+        console.warn("Speech Recognition API is not supported in this browser.");
+        micBtn.style.display = "none";
+    }
+
+    window.utterances = [];
+
+    function speakText(text) {
+        if ('speechSynthesis' in window) {
+            const cleanText = text.replace(/[*#_`~]/g, '');
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = 'en-US';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            window.utterances.push(utterance); 
+            
+            utterance.onend = function() {
+                const index = window.utterances.indexOf(utterance);
+                if (index > -1) {
+                    window.utterances.splice(index, 1);
+                }
+            };
+
+            window.speechSynthesis.speak(utterance);
+        } else {
+            console.warn("La synthèse vocale n'est pas supportée par ce navigateur.");
+        }
+    }
+
+
+    let audioUnlocked = false;
+    
+    function unlockAudio() {
+        if (!audioUnlocked && 'speechSynthesis' in window) {
+            window.speechSynthesis.cancel(); 
+
+            const silentUtterance = new SpeechSynthesisUtterance(' '); 
+            silentUtterance.volume = 0;
+            
+            window.speechSynthesis.speak(silentUtterance);
+            audioUnlocked = true;
+            console.log(" Moteur audio purgé et déverrouillé !");
+        }
+    }
+</script>
+
+</body>
+</html>
