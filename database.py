@@ -6,6 +6,22 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+class WorkspaceModel(Base):
+    __tablename__ = "workspaces"
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    currency = Column(String, default="MAD")
+    split_rule = Column(String, default="equal")
+
+class UserModel(Base): 
+    __tablename__ = "users"
+    id = Column(String, primary_key=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id"))
+    name = Column(String)
+    role = Column(String)
+    email = Column(String)
+    income_mad = Column(Float, default=0.0)
+
 class AccountModel(Base):
     __tablename__ = "accounts"
     
@@ -43,7 +59,7 @@ class TransactionModel(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     account_slug = Column(String, index=True)
-    user_id = Column(String)
+    user_id = Column(String, ForeignKey("users.id"))
     category_id = Column(String)
     amount = Column(Float) 
     date = Column(String)
@@ -62,9 +78,23 @@ class SavingsGoalModel(Base):
     target_date = Column(String)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
 
+class ContributionModel(Base):
+    __tablename__ = "contributions"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"))
+    account_id = Column(Integer, ForeignKey("accounts.id"))
+    amount = Column(Float)
+
 Base.metadata.create_all(bind=engine)
     
 db = SessionLocal()
+
+if db.query(WorkspaceModel).count() == 0:
+    ws = WorkspaceModel(id="workspace_famille_dupont", name="Famille Dupont", split_rule="equal")
+    db.add(ws)
+    u1 = UserModel(id="user_mohamed", workspace_id="workspace_famille_dupont", name="Mohamed", role="owner", income_mad=15000.0)
+    u2 = UserModel(id="user_taha", workspace_id="workspace_famille_dupont", name="Taha", role="member", income_mad=10000.0)
+    db.add_all([u1, u2])
 
 if db.query(AccountModel).count() == 0:
     demo_account = AccountModel(
@@ -85,8 +115,17 @@ if db.query(AccountModel).count() == 0:
         currency="MAD",
         balance=0.0
     )
+    joint_account = AccountModel(
+        workspace_id="workspace_famille_dupont", 
+        name="Joint Account", 
+        slug="joint_current", 
+        type="shared_current", 
+        owner_user_id=None, 
+        balance=0.0
+    )
     db.add(demo_account)
     db.add(savings_account)
+    db.add(joint_account)
 
 if db.query(CategoryModel).count() == 0:
     default_categories = [
