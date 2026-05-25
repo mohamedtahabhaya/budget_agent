@@ -74,24 +74,29 @@
         reader.readAsDataURL(file);
     }
 
-    async function sendMessage() {
+    async function sendMessage(audioBase64 = null) {
         unlockAudio();
         const inputField = document.getElementById("user-input");
         const messageText = inputField.value.trim();
-        if (!messageText) return;
+        
+        if (!messageText && !audioBase64) return;
 
-        addMessage(messageText, "user");
-        inputField.value = "";
+        if (audioBase64) {
+            addMessage("🎤 [Voice Note]", "user");
+        } else {
+            addMessage(messageText, "user");
+            inputField.value = "";
+        }
         scrollToBottom();
 
         let isApprov = false;
-        let textePropre = messageText.trim().toLowerCase();
-        
-        let contientOui = /\b(yes|oui|ok|go|vas-y|send|approuvé|approved|accept)\b/.test(textePropre);
-        let contientNon = /\b(no|non)\b/.test(textePropre);
-        
-        if (contientOui && !contientNon) {
-            isApprov = true;
+        if (!audioBase64) {
+            let textePropre = messageText.trim().toLowerCase();
+            let contientOui = /\b(yes|oui|ok|go|vas-y|send|approuvé|approved|accept)\b/.test(textePropre);
+            let contientNon = /\b(no|non)\b/.test(textePropre);
+            if (contientOui && !contientNon) {
+                isApprov = true;
+            }
         }
 
         const chatMessages = document.getElementById("chat-messages");
@@ -116,10 +121,11 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    message: messageText,
+                    message: audioBase64 ? "" : messageText,
                     session_id: maSessionUnique,
                     is_approval: isApprov,
-                    image_data: currentBase64Image
+                    image_data: currentBase64Image,
+                    audio_data: audioBase64
                 })
             });
 
@@ -214,49 +220,55 @@
     }
 
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
     const micBtn = document.getElementById('mic-btn');
 
-    if (SpeechRecognition) {
-        const recognition = new SpeechRecognition();
-        
-        recognition.lang = 'en-US'; 
-        recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
+    async function startDictation() {
+        unlockAudio();
+        if (!isRecording) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
 
-        function startDictation() {
-            unlockAudio();
-            document.getElementById("user-input").value = "";
-            recognition.start();
-            micBtn.textContent = "🔴"; 
-            micBtn.style.background = "#dc3545"; 
-            document.getElementById("user-input").placeholder = "Listening...";
-        }
+                mediaRecorder.ondataavailable = function(event) {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
 
-        recognition.onresult = function(event) {
-            const transcript = event.results[0][0].transcript;
-            console.log("🗣️ Voix captée :", transcript);
-            
-            document.getElementById("user-input").value = transcript;
-        };
+                mediaRecorder.onstop = async function() {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        const base64Data = reader.result.split(',')[1];
+                        console.log("Audio captée en base64 !");
+                        sendMessage(base64Data);
+                    };
+                    reader.readAsDataURL(audioBlob);
+                    
+                    stream.getTracks().forEach(track => track.stop());
+                };
 
-        recognition.onerror = function(event) {
-            console.error("❌ Erreur Micro : ", event.error);
-        };
-
-        recognition.onend = function() {
-            console.log("🛑 Le micro s'est éteint.");
+                mediaRecorder.start();
+                isRecording = true;
+                micBtn.textContent = "⏹️"; 
+                micBtn.style.background = "#dc3545"; 
+                document.getElementById("user-input").placeholder = "Recording voice note...";
+            } catch (err) {
+                console.error("Microphone access denied or error:", err);
+                alert("Impossible d'accéder au micro : " + err.message);
+            }
+        } else {
+            mediaRecorder.stop();
+            isRecording = false;
             micBtn.textContent = "🎤";
             micBtn.style.background = "#28a745";
             document.getElementById("user-input").placeholder = "Write your message or speak...";
-            if (document.getElementById("user-input").value.trim() !== "") {
-                sendMessage(); 
-            }
-        };
-
-    } else {
-        console.warn("Speech Recognition API is not supported in this browser.");
-        micBtn.style.display = "none";
+        }
     }
 
     window.utterances = [];

@@ -3,7 +3,7 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_groq import ChatGroq
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import AgentState
 from finance_tools import budget_tools, data_tools, analyst_tools
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-llm = ChatGroq(model="openai/gpt-oss-120b", streaming=True)
+llm = ChatGroq(model="llama-3.3-70b-versatile", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
@@ -60,19 +60,20 @@ WORKFLOWS:
 
 RULES:
 - DATA ONLY: Never guess values. Always call your tools first.
-- LANGUAGE: ALWAYS respond in the user's language.
+- LANGUAGE: ALWAYS respond in user's language.
 """
 
 general_prompt = """You are the friendly Financial Concierge. 
 Your role is to greet the user. Only for greetings and small talk."""
 
-supervisor_prompt = """You are the Supervisor. 
-- Money, expenses, transfers, or goals -> 'data_agent'.
-- Reports, summaries, balances, budgets, or "WHO OWES WHAT" -> 'analyst_agent'.
-- Greetings only -> 'general_agent'.
-- Task finished -> 'FINISH'.
+supervisor_prompt = """You are the Supervisor of a Financial AI team. 
+Analyze the conversation history. If all tasks or questions requested by the user have been answered, confirmed, or resolved in the history, you MUST return 'FINISH'.
+Otherwise, choose the next expert who needs to act:
+- If there are pending database updates (creating transactions, transfers, savings goals) -> 'data_agent'.
+- If there are pending reads/reports (summaries, balances, budget status, splits) -> 'analyst_agent'.
+- Greetings / small talk only -> 'general_agent'.
 
-Respond ONLY with the agent name: data_agent, analyst_agent, general_agent, or FINISH."""
+Respond ONLY with: data_agent, analyst_agent, general_agent, or FINISH."""
 
 data_agent_node = create_agent(llm, data_tools, data_prompt, "data_agent")
 analyst_agent_node = create_agent(llm, analyst_tools, analyst_prompt, "analyst_agent")
@@ -84,13 +85,36 @@ class SupervisorResponse(BaseModel):
 
 def supervisor_node(state: AgentState):
     print("[SUPERVISOR] Routing...")
-    messages_for_llm = [SystemMessage(content=supervisor_prompt)] + state["messages"]
+    
+    cleaned_messages = []
+    for msg in state["messages"]:
+        if isinstance(msg, tuple):
+            role, content = msg
+            if role in ["user", "human"]:
+                cleaned_messages.append(HumanMessage(content=content))
+            elif role in ["assistant", "ai"]:
+                cleaned_messages.append(AIMessage(content=content))
+            elif role == "tool":
+                cleaned_messages.append(AIMessage(content=f"[Tool Result]: {content}"))
+        else:
+            if isinstance(msg, HumanMessage) or getattr(msg, "type", "") == "human":
+                cleaned_messages.append(HumanMessage(content=msg.content))
+            elif getattr(msg, "type", "") == "ai":
+                cleaned_messages.append(AIMessage(content=msg.content))
+            elif getattr(msg, "type", "") == "tool":
+                cleaned_messages.append(AIMessage(content=f"[Tool Result]: {msg.content}"))
+            else:
+                # Fallback for any other type (e.g. custom or SystemMessage)
+                cleaned_messages.append(HumanMessage(content=str(msg.content) if hasattr(msg, "content") else str(msg)))
+            
+    messages_for_llm = [SystemMessage(content=supervisor_prompt)] + cleaned_messages
     
     try:
         llm_with_router = llm.with_structured_output(SupervisorResponse)
         response = llm_with_router.invoke(messages_for_llm)
         decision = response.next_agent
-    except:
+    except Exception as e:
+        print(f"[SUPERVISOR ERROR] Fallback routing due to: {e}")
         res = llm.invoke(messages_for_llm)
         content = res.content.lower()
         if "data_agent" in content: decision = "data_agent"
@@ -98,10 +122,10 @@ def supervisor_node(state: AgentState):
         elif "general_agent" in content: decision = "general_agent"
         else: decision = "FINISH"
 
-    if decision == state.get("sender"):
-        decision = "FINISH"
-
     print(f"[SUPERVISOR] Route -> {decision}")
+    if decision == state.get("sender"):
+        print(f"[SUPERVISOR] Loop detected (decision '{decision}' matches sender). Overriding to FINISH.")
+        decision = "FINISH"
     return {"next_agent": decision, "sender": "supervisor"}
 
 def route_after_supervisor(state: AgentState):

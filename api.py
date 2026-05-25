@@ -1,13 +1,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 import json
 from graph import graph 
-from finance_tools import parse_receipt_image
+from finance_tools import parse_receipt_image, transcribe_audio
 
 app = FastAPI()
+
+@app.get("/", response_class=HTMLResponse)
+async def read_index():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,6 +26,7 @@ class ChatRequest(BaseModel):
     session_id: str
     is_approval: Optional[bool] = False
     image_data: Optional[str] = None
+    audio_data: Optional[str] = None
     
     workspace_id: str = "workspace_famille_dupont"
     user_id: str = "user_mohamed"
@@ -31,6 +37,34 @@ async def chat_endpoint(request: ChatRequest):
         config = {"configurable": {"thread_id": request.session_id}}
         
         final_message = request.message
+        
+        # Audio transcription pre-processing
+        if request.audio_data:
+            yield f"data: {json.dumps({'type': 'status', 'content': '⚙️ Transcribing audio note...'})}\n\n"
+            try:
+                import os
+                import base64
+                
+                temp_audio_path = "scratch/temp_voice.webm"
+                os.makedirs("scratch", exist_ok=True)
+                with open(temp_audio_path, "wb") as f:
+                    f.write(base64.b64decode(request.audio_data))
+                
+                transcription_res = transcribe_audio.invoke({"audio_file_path": temp_audio_path})
+                
+                if os.path.exists(temp_audio_path):
+                    os.remove(temp_audio_path)
+                    
+                if transcription_res.startswith("Transcription successful:"):
+                    transcript_text = transcription_res.replace("Transcription successful:", "").strip()
+                    final_message = f"{transcript_text}\n\n{final_message}".strip()
+                    status_msg = f'🎤 Transcription: "{transcript_text}"'
+                    yield f"data: {json.dumps({'type': 'status', 'content': status_msg})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'content': f'Audio transcription failed: {transcription_res}'})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'type': 'error', 'content': f'Audio transcription error: {str(e)}'})}\n\n"
+
         if request.image_data:
             yield f"data: {json.dumps({'type': 'status', 'content': 'Analyzing the current receipt...'})}\n\n"
             try:

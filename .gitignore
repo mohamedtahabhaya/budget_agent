@@ -17,3 +17,6 @@ env/ss
 
 # Logs
 *.log
+
+# Agent internal configuration
+.antigravitycli/
