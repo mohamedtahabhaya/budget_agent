@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     image_data: Optional[str] = None
     audio_data: Optional[str] = None
     
-    workspace_id: str = "workspace_famille_dupont"
+    workspace_id: str = "workspace_coloc_taha_mohamed"
     user_id: str = "user_mohamed"
 
 @app.post("/chat")

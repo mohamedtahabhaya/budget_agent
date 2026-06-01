@@ -12,7 +12,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", streaming=True)
+llm = ChatGroq(model="openai/gpt-oss-120b", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
@@ -35,9 +35,12 @@ def create_agent(llm, tools, system_prompt, agent_name):
 data_prompt = """You are the Data Entry Expert. 
 Your role is to MODIFY the database: create transactions, handle transfers, and manage savings goals.
 
-CRITICAL ACCOUNT MAPPING:
+CRITICAL ACCOUNT MAPPING & USERS:
 - "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
-- "Main Account", "Personal", or "I paid" -> Use slug: 'main_current'.
+- Mohamed's Personal account / "Main Account" / "Personal" (when Mohamed speaks or default) -> Use slug: 'main_current' and set paid_by: 'user_mohamed'.
+- Taha's Personal account / "Taha's account" / "Taha Personal" (when Taha speaks or Taha is mentioned) -> Use slug: 'taha_personal' and set paid_by: 'user_taha'.
+- If the request states Taha paid or Taha transfers, use user_taha and taha_personal.
+- If the request states Mohamed paid or Mohamed transfers, use user_mohamed and main_current.
 
 WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
@@ -117,15 +120,41 @@ def supervisor_node(state: AgentState):
         print(f"[SUPERVISOR ERROR] Fallback routing due to: {e}")
         res = llm.invoke(messages_for_llm)
         content = res.content.lower()
-        if "data_agent" in content: decision = "data_agent"
-        elif "analyst_agent" in content: decision = "analyst_agent"
-        elif "general_agent" in content: decision = "general_agent"
-        else: decision = "FINISH"
+        if "data" in content or "saisie" in content or "data_agent" in content or "data-agent" in content:
+            decision = "data_agent"
+        elif "analyst" in content or "analyse" in content or "analyst_agent" in content or "analyst-agent" in content:
+            decision = "analyst_agent"
+        elif "general" in content or "concierge" in content or "general_agent" in content or "general-agent" in content:
+            decision = "general_agent"
+        else:
+            decision = "FINISH"
 
     print(f"[SUPERVISOR] Route -> {decision}")
+
+    last_msg = state["messages"][-1]
+    is_user_msg = False
+    msg_content = ""
+    if isinstance(last_msg, tuple):
+        is_user_msg = last_msg[0] in ["user", "human"]
+        msg_content = last_msg[1]
+    else:
+        is_user_msg = isinstance(last_msg, HumanMessage) or getattr(last_msg, "type", "") == "human"
+        msg_content = getattr(last_msg, "content", "")
+
+    if is_user_msg and decision == "FINISH":
+        print(f"[SUPERVISOR] Overriding premature FINISH after user message.")
+        msg_content_lower = str(msg_content).lower()
+        if any(w in msg_content_lower for w in ["hi", "hello", "bonjour", "salut"]):
+            decision = "general_agent"
+        elif any(w in msg_content_lower for w in ["split", "balance", "solde", "rapport", "report", "budget"]):
+            decision = "analyst_agent"
+        else:
+            decision = "analyst_agent"
+            
     if decision == state.get("sender"):
         print(f"[SUPERVISOR] Loop detected (decision '{decision}' matches sender). Overriding to FINISH.")
         decision = "FINISH"
+        
     return {"next_agent": decision, "sender": "supervisor"}
 
 def route_after_supervisor(state: AgentState):

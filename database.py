@@ -100,32 +100,42 @@ Base.metadata.create_all(bind=engine)
 
 def seed_database():
     with SessionLocal() as db:
+        ws_id = "workspace_coloc_taha_mohamed"
         if db.query(WorkspaceModel).count() == 0:
-            ws = WorkspaceModel(id="workspace_famille_dupont", name="Famille Dupont", split_rule="equal")
+            ws = WorkspaceModel(id=ws_id, name="Coloc Taha & Mohamed", split_rule="equal")
             db.add(ws)
-            u1 = UserModel(id="user_mohamed", workspace_id="workspace_famille_dupont", name="Mohamed", role="owner", income_mad=15000.0)
-            u2 = UserModel(id="user_taha", workspace_id="workspace_famille_dupont", name="Taha", role="member", income_mad=10000.0)
+            u1 = UserModel(id="user_mohamed", workspace_id=ws_id, name="Mohamed", role="owner", income_mad=15000.0)
+            u2 = UserModel(id="user_taha", workspace_id=ws_id, name="Taha", role="member", income_mad=10000.0)
             db.add_all([u1, u2])
             
             import json
-            dupont_split = SplitRuleModel(
-                workspace_id="workspace_famille_dupont",
+            coloc_split = SplitRuleModel(
+                workspace_id=ws_id,
                 member_percentages=json.dumps({"user_mohamed": 0.5, "user_taha": 0.5})
             )
-            db.add(dupont_split)
+            db.add(coloc_split)
 
         if db.query(AccountModel).count() == 0:
-            demo_account = AccountModel(
-                workspace_id="workspace_famille_dupont",
-                name="Main Current",
+            mohamed_account = AccountModel(
+                workspace_id=ws_id,
+                name="Mohamed Personal",
                 slug="main_current",
                 type="personal",
                 owner_user_id="user_mohamed",
                 currency="MAD",
                 balance=5000.0
             )
+            taha_account = AccountModel(
+                workspace_id=ws_id,
+                name="Taha Personal",
+                slug="taha_personal",
+                type="personal",
+                owner_user_id="user_taha",
+                currency="MAD",
+                balance=5000.0
+            )
             savings_account = AccountModel(
-                workspace_id="workspace_famille_dupont",
+                workspace_id=ws_id,
                 name="Emergency Fund",
                 slug="emergency_fund",
                 type="shared_savings",
@@ -134,31 +144,29 @@ def seed_database():
                 balance=0.0
             )
             joint_account = AccountModel(
-                workspace_id="workspace_famille_dupont", 
+                workspace_id=ws_id, 
                 name="Joint Account", 
                 slug="joint_current", 
                 type="shared_current", 
                 owner_user_id=None, 
                 balance=0.0
             )
-            db.add(demo_account)
-            db.add(savings_account)
-            db.add(joint_account)
+            db.add_all([mohamed_account, taha_account, savings_account, joint_account])
 
         if db.query(CategoryModel).count() == 0:
             default_categories = [
-                CategoryModel(id="cat_groceries", workspace_id="workspace_famille_dupont", name="Groceries", icon="🛒", kind="expense"),
-                CategoryModel(id="cat_rent", workspace_id="workspace_famille_dupont", name="Rent", icon="🏠", kind="expense"),
-                CategoryModel(id="cat_utilities", workspace_id="workspace_famille_dupont", name="Utilities", icon="⚡", kind="expense"),
-                CategoryModel(id="cat_transport", workspace_id="workspace_famille_dupont", name="Transport", icon="🚗", kind="expense"),
-                CategoryModel(id="cat_dining", workspace_id="workspace_famille_dupont", name="Dining out", icon="🍽️", kind="expense"),
-                CategoryModel(id="cat_health", workspace_id="workspace_famille_dupont", name="Health", icon="💊", kind="expense"),
-                CategoryModel(id="cat_personal", workspace_id="workspace_famille_dupont", name="Personal care", icon="💇", kind="expense"),
-                CategoryModel(id="cat_leisure", workspace_id="workspace_famille_dupont", name="Leisure & shopping", icon="🛍️", kind="expense"),
-                CategoryModel(id="cat_travel", workspace_id="workspace_famille_dupont", name="Travel", icon="✈️", kind="expense"),
-                CategoryModel(id="cat_kids", workspace_id="workspace_famille_dupont", name="Kids & family", icon="🧸", kind="expense"),
-                CategoryModel(id="cat_savings", workspace_id="workspace_famille_dupont", name="Savings transfer", icon="💰", kind="transfer"),
-                CategoryModel(id="cat_income", workspace_id="workspace_famille_dupont", name="Income", icon="💵", kind="income")
+                CategoryModel(id="cat_groceries", workspace_id=ws_id, name="Groceries", icon="🛒", kind="expense"),
+                CategoryModel(id="cat_rent", workspace_id=ws_id, name="Rent", icon="🏠", kind="expense"),
+                CategoryModel(id="cat_utilities", workspace_id=ws_id, name="Utilities", icon="⚡", kind="expense"),
+                CategoryModel(id="cat_transport", workspace_id=ws_id, name="Transport", icon="🚗", kind="expense"),
+                CategoryModel(id="cat_dining", workspace_id=ws_id, name="Dining out", icon="🍽️", kind="expense"),
+                CategoryModel(id="cat_health", workspace_id=ws_id, name="Health", icon="💊", kind="expense"),
+                CategoryModel(id="cat_personal", workspace_id=ws_id, name="Personal care", icon="💇", kind="expense"),
+                CategoryModel(id="cat_leisure", workspace_id=ws_id, name="Leisure & shopping", icon="🛍️", kind="expense"),
+                CategoryModel(id="cat_travel", workspace_id=ws_id, name="Travel", icon="✈️", kind="expense"),
+                CategoryModel(id="cat_kids", workspace_id=ws_id, name="Kids & family", icon="🧸", kind="expense"),
+                CategoryModel(id="cat_savings", workspace_id=ws_id, name="Savings transfer", icon="💰", kind="transfer"),
+                CategoryModel(id="cat_income", workspace_id=ws_id, name="Income", icon="💵", kind="income")
             ]
             db.add_all(default_categories)
 
