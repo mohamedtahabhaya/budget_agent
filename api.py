@@ -5,9 +5,18 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 from graph import graph 
-from finance_tools import parse_receipt_image, transcribe_audio
+from finance_tools import parse_receipt_image, transcribe_audio, process_recurring_transactions
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    print("[STARTUP] Processing recurring transactions...")
+    try:
+        res = process_recurring_transactions.invoke({"workspace_id": "workspace_coloc_taha_mohamed"})
+        print(f"[STARTUP] Result:\n{res}")
+    except Exception as e:
+        print(f"[STARTUP ERROR] Failed to process recurring transactions: {e}")
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():

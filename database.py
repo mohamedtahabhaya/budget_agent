@@ -96,6 +96,27 @@ class SplitRuleModel(Base):
     workspace_id = Column(String, ForeignKey("workspaces.id"), unique=True)
     member_percentages = Column(String)
 
+class RecurringTransactionModel(Base):
+    __tablename__ = "recurring_transactions"
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id"))
+    name = Column(String)
+    amount = Column(Float)
+    category_id = Column(String, ForeignKey("categories.id"))
+    account_id = Column(Integer, ForeignKey("accounts.id"))
+    frequency = Column(String)  # 'weekly', 'monthly'
+    start_date = Column(String)  # YYYY-MM-DD
+    next_occurrence_date = Column(String)  # YYYY-MM-DD
+    is_active = Column(Boolean, default=True)
+
+class NotificationModel(Base):
+    __tablename__ = "notifications"
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id"))
+    message = Column(String)
+    timestamp = Column(String)
+    is_read = Column(Boolean, default=False)
+
 Base.metadata.create_all(bind=engine)
 
 def seed_database():
@@ -114,6 +135,9 @@ def seed_database():
                 member_percentages=json.dumps({"user_mohamed": 0.5, "user_taha": 0.5})
             )
             db.add(coloc_split)
+            db.commit()
+
+
 
         if db.query(AccountModel).count() == 0:
             mohamed_account = AccountModel(
@@ -178,6 +202,7 @@ def seed_database():
                 alert_threshold_pct=80.0
             )
             db.add(demo_budget)
+
         db.commit()
 
 seed_database()

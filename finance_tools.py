@@ -1,12 +1,15 @@
 import os
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Union
 from langchain_core.tools import tool
-from groq import Groq
-from langchain_groq import ChatGroq
+from openai import OpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
-from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel, SavingsGoalModel, UserModel, WorkspaceModel, SplitRuleModel
-from datetime import datetime
+from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel, SavingsGoalModel, UserModel, WorkspaceModel, SplitRuleModel, RecurringTransactionModel, NotificationModel
+from datetime import datetime, date, timedelta
+import calendar
+import csv
+import io
 from sqlalchemy import func, desc
 
 class ListAccountsSchema(BaseModel):
@@ -71,15 +74,20 @@ def list_recent_transactions(account_slug: str, limit: int = 5) -> str:
         db.close()
 
 class DeleteTransactionSchema(BaseModel):
-    transaction_id: int
+    transaction_id: Union[int, str] = Field(..., description="The ID of the transaction to delete.")
 
 @tool(args_schema=DeleteTransactionSchema)
-def delete_transaction(transaction_id: int) -> str:
+def delete_transaction(transaction_id: Union[int, str]) -> str:
     """Delete a transaction by its ID and restore the account balance."""
     db = SessionLocal()
     try:
-        tx = db.query(TransactionModel).filter(TransactionModel.id == transaction_id).first()
-        if not tx: return f"Error: Transaction {transaction_id} not found."
+        try:
+            tx_id = int(transaction_id)
+        except ValueError:
+            return f"Error: ID must be a number. Got '{transaction_id}'."
+            
+        tx = db.query(TransactionModel).filter(TransactionModel.id == tx_id).first()
+        if not tx: return f"Error: Transaction {tx_id} not found."
         
         account = db.query(AccountModel).filter(AccountModel.id == tx.account_id).first()
         if account:
@@ -87,7 +95,7 @@ def delete_transaction(transaction_id: int) -> str:
             
         db.delete(tx)
         db.commit()
-        return f"Success: Transaction {transaction_id} deleted. Balance restored."
+        return f"Success: Transaction {tx_id} deleted. Balance restored."
     except Exception as e:
         db.rollback()
         return f"Error: {str(e)}"
@@ -146,7 +154,7 @@ def categorize(workspace_id: str, category_name: str) -> str:
                 return c.id
                 
         cat_list = ", ".join([f"{c.name} (ID: {c.id})" for c in categories])
-        llm = ChatGroq(model="llama-3.3-70b-versatile", temperature=0)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         prompt = f"Given the category list: [{cat_list}], which ID best matches: '{category_name}'? Return ONLY the ID (e.g., cat_groceries). If no match, return 'cat_leisure'."
         response = llm.invoke(prompt)
         matched_id = response.content.strip()
@@ -250,6 +258,16 @@ def create_transaction(account_slug: str, amount: float, date: str, merchant: st
             "account_slug": account_slug,
             "user_id": paid_by
         })
+        
+        if "CRITICAL" in budget_info:
+            notif = NotificationModel(
+                workspace_id=account.workspace_id,
+                message=f"CRITICAL Budget Alert: {budget_info}",
+                timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                is_read=False
+            )
+            db.add(notif)
+            db.commit()
         
         return f"Success: Logged {amount} {account.currency} at {merchant} on {account.name}. New balance: {account.balance} {account.currency}. {budget_info}"
     except Exception as e:
@@ -536,10 +554,10 @@ class TranscribeAudioSchema(BaseModel):
 def transcribe_audio(audio_file_path: str) -> str:
     """Speech-to-text on a voice note; returns the transcript."""
     try:
-        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         with open(audio_file_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
-                model="whisper-large-v3", 
+                model="whisper-1", 
                 file=audio_file
             )
         return f"Transcription successful: {transcript.text}"
@@ -553,7 +571,7 @@ class ParseReceiptSchema(BaseModel):
 def parse_receipt_image(base64_image: str) -> str:
     """Vision call: extract merchant, total, date, line items from a receipt photo."""
     try:
-        vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
+        vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
         
         prompt = """
         You are an expert accountant. Analyze this receipt and extract the following information in JSON format:
@@ -643,7 +661,370 @@ def transfer(source_slug: str, dest_slug: str, amount: float, initiated_by: str 
     finally:
         db.close()
 
-data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, categorize, transcribe_audio, parse_receipt_image]
-analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget]
+def parse_moroccan_date(date_str: str) -> str:
+    date_str = date_str.strip()
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%y"):
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return date_str
+
+def detect_bank_and_delimiter(lines: List[str]) -> tuple:
+    for i, line in enumerate(lines[:5]):
+        line_lower = line.lower()
+        if "date d'opération" in line_lower and "libellé" in line_lower and "montant" in line_lower:
+            return "Attijariwafa", ";", lines[i:]
+        elif "date de valeur" in line_lower and "libellé de l'opération" in line_lower and "montant" in line_lower:
+            return "SG", ";", lines[i:]
+        elif "date" in line_lower and "description" in line_lower and "débit" in line_lower and "crédit" in line_lower:
+            return "BMCE", ",", lines[i:]
+    
+    first_line = lines[0] if lines else ""
+    if ";" in first_line:
+        if "valeur" in first_line.lower():
+            return "SG", ";", lines
+        return "Attijariwafa", ";", lines
+    return "BMCE", ",", lines
+
+def read_csv_file(file_path: str) -> str:
+    for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
+        try:
+            with open(file_path, "r", encoding=encoding) as f:
+                return f.read()
+        except UnicodeDecodeError:
+            continue
+    raise ValueError("Could not decode CSV file with standard encodings.")
+
+class CreateRecurringTransactionSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    name: str = Field(..., description="The name of the subscription/transaction.")
+    amount: float = Field(..., description="The positive amount for expenses, negative for income.")
+    category_id: str = Field(..., description="Category ID for the transaction.")
+    account_slug: str = Field(..., description="The account slug to pay from (e.g. main_current).")
+    frequency: str = Field(..., description="Frequency of the transaction: 'weekly' or 'monthly'.")
+    start_date: str = Field(..., description="Start date in YYYY-MM-DD format.")
+
+@tool(args_schema=CreateRecurringTransactionSchema)
+def create_recurring_transaction(workspace_id: str, name: str, amount: float, category_id: str, account_slug: str, frequency: str, start_date: str) -> str:
+    """Schedule a recurring weekly or monthly subscription/transaction."""
+    db = SessionLocal()
+    try:
+        account = db.query(AccountModel).filter(AccountModel.slug == account_slug).first()
+        if not account:
+            return f"Error: Account '{account_slug}' not found."
+        
+        frequency = frequency.strip().lower()
+        if frequency not in ["weekly", "monthly"]:
+            return f"Error: Frequency must be 'weekly' or 'monthly'. Got '{frequency}'."
+            
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError:
+            return f"Error: start_date must be in YYYY-MM-DD format."
+            
+        new_rec = RecurringTransactionModel(
+            workspace_id=workspace_id,
+            name=name,
+            amount=amount,
+            category_id=category_id,
+            account_id=account.id,
+            frequency=frequency,
+            start_date=start_date,
+            next_occurrence_date=start_date,
+            is_active=True
+        )
+        db.add(new_rec)
+        db.commit()
+        return f"Success: Recurring transaction '{name}' scheduled. First occurrence: {start_date} ({frequency})."
+    except Exception as e:
+        db.rollback()
+        return f"Error: {str(e)}"
+    finally:
+        db.close()
+
+class ListRecurringTransactionsSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+
+@tool(args_schema=ListRecurringTransactionsSchema)
+def list_recurring_transactions(workspace_id: str) -> str:
+    """List all scheduled recurring transactions."""
+    db = SessionLocal()
+    try:
+        recs = db.query(RecurringTransactionModel).filter(RecurringTransactionModel.workspace_id == workspace_id).all()
+        if not recs:
+            return "No recurring transactions scheduled."
+        
+        output = "Recurring Transactions:\n"
+        for r in recs:
+            account = db.query(AccountModel).filter(AccountModel.id == r.account_id).first()
+            acc_name = account.name if account else "Unknown"
+            status = "Active" if r.is_active else "Inactive"
+            output += f"- ID: {r.id} | {r.name} | {r.amount} MAD | Frequency: {r.frequency} | Next occurrence: {r.next_occurrence_date} | Account: {acc_name} ({status})\n"
+        return output
+    except Exception as e:
+        return f"Error: {str(e)}"
+    finally:
+        db.close()
+
+class ProcessRecurringTransactionsSchema(BaseModel):
+    workspace_id: Optional[str] = Field(default=None, description="Optional ID of the workspace. If not specified, processes all workspaces.")
+
+@tool(args_schema=ProcessRecurringTransactionsSchema)
+def process_recurring_transactions(workspace_id: Optional[str] = None) -> str:
+    """Process any pending occurrences of recurring transactions and update their next dates."""
+    db = SessionLocal()
+    try:
+        query = db.query(RecurringTransactionModel).filter(
+            RecurringTransactionModel.is_active == True
+        )
+        if workspace_id:
+            query = query.filter(RecurringTransactionModel.workspace_id == workspace_id)
+            
+        recs = query.all()
+        if not recs:
+            return "No active recurring transactions to process."
+            
+        today = date.today()
+        
+        triggered_count = 0
+        details = []
+        
+        for r in recs:
+            next_date_str = r.next_occurrence_date
+            next_date = datetime.strptime(next_date_str, "%Y-%m-%d").date()
+            
+            while next_date <= today:
+                account = db.query(AccountModel).filter(AccountModel.id == r.account_id).first()
+                if not account:
+                    details.append(f"Error: Account not found for recurring transaction ID {r.id}")
+                    break
+                
+                paid_by = account.owner_user_id
+                if not paid_by:
+                    owner = db.query(UserModel).filter(UserModel.workspace_id == r.workspace_id, UserModel.role == "owner").first()
+                    paid_by = owner.id if owner else "user_mohamed"
+                
+                res = create_transaction.invoke({
+                    "account_slug": account.slug,
+                    "amount": r.amount,
+                    "date": next_date.strftime("%Y-%m-%d"),
+                    "merchant": r.name,
+                    "category_id": r.category_id,
+                    "paid_by": paid_by,
+                    "note": f"Auto-generated recurring transaction (ID: {r.id})"
+                })
+                
+                triggered_count += 1
+                details.append(f"Generated: {r.name} - {r.amount} MAD on {next_date.strftime('%Y-%m-%d')} for account {account.name}. Result: {res}")
+                
+                if r.frequency == 'weekly':
+                    next_date = next_date + timedelta(days=7)
+                elif r.frequency == 'monthly':
+                    year = next_date.year + (next_date.month // 12)
+                    month = (next_date.month % 12) + 1
+                    last_day = calendar.monthrange(year, month)[1]
+                    day = min(next_date.day, last_day)
+                    next_date = date(year, month, day)
+                else:
+                    next_date = next_date + timedelta(days=30)
+            
+            r.next_occurrence_date = next_date.strftime("%Y-%m-%d")
+            
+        db.commit()
+        return f"Processed recurring transactions. Triggered {triggered_count} transactions.\n" + "\n".join(details)
+    except Exception as e:
+        db.rollback()
+        return f"Error: {str(e)}"
+    finally:
+        db.close()
+
+class ImportBankCSVSchema(BaseModel):
+    file_path: str = Field(..., description="Absolute path to the CSV file.")
+    account_slug: str = Field(..., description="Account slug to import transactions into.")
+    workspace_id: str = Field(..., description="The ID of the current workspace.")
+    bank_name: Optional[str] = Field(default=None, description="Optional bank name: 'Attijariwafa', 'BMCE', or 'SG'. If omitted, detected automatically.")
+
+@tool(args_schema=ImportBankCSVSchema)
+def import_bank_csv(file_path: str, account_slug: str, workspace_id: str, bank_name: Optional[str] = None) -> str:
+    """Import transactions from a Moroccan bank CSV statement (Attijariwafa, BMCE, SG)."""
+    db = SessionLocal()
+    try:
+        content = read_csv_file(file_path)
+        lines = [l.strip() for l in content.splitlines() if l.strip()]
+        if not lines:
+            return "Error: Empty CSV file."
+            
+        detected_bank, delimiter, csv_lines = detect_bank_and_delimiter(lines)
+        if bank_name:
+            detected_bank = bank_name
+            if bank_name == "BMCE":
+                delimiter = ","
+            else:
+                delimiter = ";"
+                
+        reader = csv.DictReader(io.StringIO("\n".join(csv_lines)), delimiter=delimiter)
+        if reader.fieldnames:
+            reader.fieldnames = [f.strip().lower() for f in reader.fieldnames]
+            
+        imported_count = 0
+        details = []
+        
+        for row in reader:
+            cleaned_row = {k.strip().lower() if k else "": v for k, v in row.items()}
+            
+            raw_date = ""
+            raw_merchant = ""
+            raw_amount_str = "0"
+            is_expense = True
+            
+            if detected_bank == "Attijariwafa":
+                raw_date = cleaned_row.get("date d'opération", "")
+                raw_merchant = cleaned_row.get("libellé", "")
+                raw_amount_str = cleaned_row.get("montant", "0")
+            elif detected_bank == "SG":
+                raw_date = cleaned_row.get("date de valeur", "")
+                raw_merchant = cleaned_row.get("libellé de l'opération", "")
+                raw_amount_str = cleaned_row.get("montant", "0")
+            elif detected_bank == "BMCE":
+                raw_date = cleaned_row.get("date", "")
+                raw_merchant = cleaned_row.get("description", "")
+                debit_str = cleaned_row.get("débit", cleaned_row.get("debit", "")).strip()
+                credit_str = cleaned_row.get("crédit", cleaned_row.get("credit", "")).strip()
+                if debit_str:
+                    raw_amount_str = debit_str
+                    is_expense = True
+                elif credit_str:
+                    raw_amount_str = credit_str
+                    is_expense = False
+                else:
+                    raw_amount_str = "0"
+            else:
+                raw_date = cleaned_row.get("date", "")
+                raw_merchant = cleaned_row.get("description", cleaned_row.get("libellé", ""))
+                raw_amount_str = cleaned_row.get("montant", "0")
+                
+            if not raw_amount_str:
+                raw_amount_str = "0"
+                
+            cleaned_amount_str = raw_amount_str.strip().replace(" ", "").replace("\xa0", "")
+            if "," in cleaned_amount_str and "." in cleaned_amount_str:
+                if cleaned_amount_str.index(".") < cleaned_amount_str.index(","):
+                    cleaned_amount_str = cleaned_amount_str.replace(".", "").replace(",", ".")
+                else:
+                    cleaned_amount_str = cleaned_amount_str.replace(",", "")
+            elif "," in cleaned_amount_str:
+                cleaned_amount_str = cleaned_amount_str.replace(",", ".")
+                
+            try:
+                parsed_amount = float(cleaned_amount_str)
+            except ValueError:
+                parsed_amount = 0.0
+                
+            if detected_bank in ["Attijariwafa", "SG"]:
+                if parsed_amount < 0:
+                    db_amount = abs(parsed_amount)
+                else:
+                    db_amount = -abs(parsed_amount)
+            else:
+                if is_expense:
+                    db_amount = abs(parsed_amount)
+                else:
+                    db_amount = -abs(parsed_amount)
+                    
+            formatted_date = parse_moroccan_date(raw_date)
+            if db_amount == 0.0 or not raw_merchant or not formatted_date:
+                continue
+                
+            category_id = categorize.invoke({
+                "workspace_id": workspace_id,
+                "category_name": raw_merchant
+            })
+            
+            db_query = db.query(AccountModel).filter(AccountModel.slug == account_slug).first()
+            if db_query and db_query.owner_user_id:
+                paid_by = db_query.owner_user_id
+            else:
+                owner = db.query(UserModel).filter(UserModel.workspace_id == workspace_id, UserModel.role == "owner").first()
+                paid_by = owner.id if owner else "user_mohamed"
+                
+            res = create_transaction.invoke({
+                "account_slug": account_slug,
+                "amount": db_amount,
+                "date": formatted_date,
+                "merchant": raw_merchant.strip(),
+                "category_id": category_id,
+                "paid_by": paid_by,
+                "note": f"Imported from {detected_bank} statement"
+            })
+            
+            imported_count += 1
+            details.append(f"Imported: {raw_merchant.strip()} | {db_amount} MAD | Date: {formatted_date} | Category: {category_id} | Result: {res}")
+            
+        return f"Successfully imported {imported_count} transactions from {detected_bank} CSV statement.\n" + "\n".join(details)
+    except Exception as e:
+        return f"Error importing CSV: {str(e)}"
+    finally:
+        db.close()
+
+class ListNotificationsSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    limit: int = Field(default=10, description="The maximum number of notifications to return.")
+
+@tool(args_schema=ListNotificationsSchema)
+def list_notifications(workspace_id: str, limit: int = 10) -> str:
+    """List unread or recent notifications/warnings for a workspace."""
+    db = SessionLocal()
+    try:
+        notifs = db.query(NotificationModel).filter(
+            NotificationModel.workspace_id == workspace_id
+        ).order_by(desc(NotificationModel.timestamp)).limit(limit).all()
+        
+        if not notifs:
+            return "No notifications found."
+            
+        output = "Recent Alerts & Notifications:\n"
+        for n in notifs:
+            read_flag = " [READ]" if n.is_read else " [UNREAD]"
+            output += f"ID: {n.id} | {n.timestamp} | {n.message}{read_flag}\n"
+            n.is_read = True
+            
+        db.commit()
+        return output
+    except Exception as e:
+        return f"Error listing notifications: {str(e)}"
+    finally:
+        db.close()
+
+class DeleteRecurringTransactionSchema(BaseModel):
+    recurring_transaction_id: Union[int, str] = Field(..., description="The ID of the recurring transaction to delete.")
+
+@tool(args_schema=DeleteRecurringTransactionSchema)
+def delete_recurring_transaction(recurring_transaction_id: Union[int, str]) -> str:
+    """Delete or cancel a scheduled recurring transaction by its ID."""
+    db = SessionLocal()
+    try:
+        try:
+            rec_id = int(recurring_transaction_id)
+        except ValueError:
+            return f"Error: ID must be a number. Got '{recurring_transaction_id}'."
+            
+        rec = db.query(RecurringTransactionModel).filter(RecurringTransactionModel.id == rec_id).first()
+        if not rec:
+            return f"Error: Recurring transaction ID {rec_id} not found."
+        
+        name = rec.name
+        db.delete(rec)
+        db.commit()
+        return f"Success: Recurring transaction ID {rec_id} ('{name}') deleted/cancelled."
+    except Exception as e:
+        db.rollback()
+        return f"Error deleting recurring transaction: {str(e)}"
+    finally:
+        db.close()
+
+data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, categorize, transcribe_audio, parse_receipt_image, create_recurring_transaction, import_bank_csv, process_recurring_transactions, delete_recurring_transaction]
+analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget, list_recurring_transactions, list_notifications]
 
 budget_tools = data_tools + analyst_tools

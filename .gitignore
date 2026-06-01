@@ -20,3 +20,8 @@ env/ss
 
 # Agent internal configuration
 .antigravitycli/
+
+# Temporary scratch files
+scratch/*.csv
+scratch/*.webm
+scratch/temp_voice.webm

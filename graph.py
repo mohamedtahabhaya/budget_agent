@@ -1,18 +1,20 @@
 import os
+import warnings
+warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
+from dotenv import load_dotenv
+load_dotenv()
 from langgraph.graph import StateGraph, START, END 
 from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
-from langchain_groq import ChatGroq
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from state import AgentState
 from finance_tools import budget_tools, data_tools, analyst_tools
 from pydantic import BaseModel
 from typing import Literal
 from datetime import datetime
-from dotenv import load_dotenv
-load_dotenv()
+from langchain_openai import ChatOpenAI
 
-llm = ChatGroq(model="openai/gpt-oss-120b", streaming=True)
+llm = ChatOpenAI(model="gpt-4o-mini", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
@@ -33,7 +35,7 @@ def create_agent(llm, tools, system_prompt, agent_name):
     return agent_node
 
 data_prompt = """You are the Data Entry Expert. 
-Your role is to MODIFY the database: create transactions, handle transfers, and manage savings goals.
+Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, and import bank CSV statements.
 
 CRITICAL ACCOUNT MAPPING & USERS:
 - "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
@@ -46,6 +48,9 @@ WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
 2. TRANSFER: 'transfer' -> 'get_balances'.
 3. SAVINGS: 'update_savings_goal'.
+4. RECURRING/SUBSCRIPTION: 'create_recurring_transaction' to schedule a weekly or monthly subscription/transaction. Use 'delete_recurring_transaction' to cancel/delete a scheduled recurring transaction by ID.
+5. BANK IMPORT: 'import_bank_csv' to parse CSV statements (Attijariwafa, BMCE, SG) and load them into the database.
+6. PROCESS RECURRING: 'process_recurring_transactions' to trigger pending occurrences.
 
 RULES:
 - ACTION ORIENTED: Call tools immediately with defaults (date=today, merchant=Unknown) if details are missing.
@@ -54,12 +59,14 @@ RULES:
 """
 
 analyst_prompt = """You are the Financial Analyst. 
-Your role is to READ and SYNTHESIZE data: balances, budgets, splits, and reports.
+Your role is to READ and SYNTHESIZE data: balances, budgets, splits, reports, recurring schedules, and notifications/alerts.
 
 WORKFLOWS:
 1. OVERVIEW/REPORT: Always use 'generate_report' for summaries or "how am I doing" queries.
 2. SPLITS: Use 'compute_split' for "who owes what".
 3. BALANCES: Use 'get_balances' for current status.
+4. RECURRING SCHEDULES: Use 'list_recurring_transactions' to list scheduled recurring entries.
+5. ALERTS/NOTIFICATIONS: Use 'list_notifications' to see recent warnings, system alerts, or budget violations.
 
 RULES:
 - DATA ONLY: Never guess values. Always call your tools first.
@@ -78,8 +85,8 @@ Otherwise, choose the next expert who needs to act:
 
 Respond ONLY with: data_agent, analyst_agent, general_agent, or FINISH."""
 
-data_agent_node = create_agent(llm, data_tools, data_prompt, "data_agent")
-analyst_agent_node = create_agent(llm, analyst_tools, analyst_prompt, "analyst_agent")
+data_agent_node = create_agent(llm, budget_tools, data_prompt, "data_agent")
+analyst_agent_node = create_agent(llm, budget_tools, analyst_prompt, "analyst_agent")
 general_agent_node = create_agent(llm, [], general_prompt, "general_agent")
 
 class SupervisorResponse(BaseModel):
@@ -107,7 +114,6 @@ def supervisor_node(state: AgentState):
             elif getattr(msg, "type", "") == "tool":
                 cleaned_messages.append(AIMessage(content=f"[Tool Result]: {msg.content}"))
             else:
-                # Fallback for any other type (e.g. custom or SystemMessage)
                 cleaned_messages.append(HumanMessage(content=str(msg.content) if hasattr(msg, "content") else str(msg)))
             
     messages_for_llm = [SystemMessage(content=supervisor_prompt)] + cleaned_messages
