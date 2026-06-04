@@ -12,16 +12,19 @@ from finance_tools import budget_tools, data_tools, analyst_tools
 from pydantic import BaseModel
 from typing import Literal
 from datetime import datetime
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 
-llm = ChatOpenAI(model="gpt-4o-mini", streaming=True)
+llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
 
 def create_agent(llm, tools, system_prompt, agent_name):
     """Fonction usine pour créer nos experts financiers."""
-    llm_with_tools = llm.bind_tools(tools)
+    if tools:
+        llm_with_tools = llm.bind_tools(tools)
+    else:
+        llm_with_tools = llm
     
     def agent_node(state: AgentState):
         workspace = state.get("workspace_id", "default_workspace")
@@ -35,10 +38,11 @@ def create_agent(llm, tools, system_prompt, agent_name):
     return agent_node
 
 data_prompt = """You are the Data Entry Expert. 
-Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, and import bank CSV statements.
+Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, import bank CSV statements, and manage workspace invitations.
 
 CRITICAL ACCOUNT MAPPING & USERS:
 - "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
+- "Emergency Fund" or "Emergency account" -> Use slug: 'emergency_fund' (shared savings account).
 - Mohamed's Personal account / "Main Account" / "Personal" (when Mohamed speaks or default) -> Use slug: 'main_current' and set paid_by: 'user_mohamed'.
 - Taha's Personal account / "Taha's account" / "Taha Personal" (when Taha speaks or Taha is mentioned) -> Use slug: 'taha_personal' and set paid_by: 'user_taha'.
 - If the request states Taha paid or Taha transfers, use user_taha and taha_personal.
@@ -47,19 +51,22 @@ CRITICAL ACCOUNT MAPPING & USERS:
 WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
 2. TRANSFER: 'transfer' -> 'get_balances'.
-3. SAVINGS: 'update_savings_goal'.
+3. SAVINGS: 'create_savings_goal' to make a new savings goal target, 'update_savings_goal' to add/deposit money to it, 'delete_savings_goal' to cancel/delete a goal, and 'update_savings_goal_properties' to edit/modify an existing goal's details (like changing its name, target amount, target date, or category).
 4. RECURRING/SUBSCRIPTION: 'create_recurring_transaction' to schedule a weekly or monthly subscription/transaction. Use 'delete_recurring_transaction' to cancel/delete a scheduled recurring transaction by ID.
 5. BANK IMPORT: 'import_bank_csv' to parse CSV statements (Attijariwafa, BMCE, SG) and load them into the database.
 6. PROCESS RECURRING: 'process_recurring_transactions' to trigger pending occurrences.
+7. INVITATIONS: 'create_workspace_invite' to create and register an invitation for a new member.
+8. PREFERENCES: 'update_notification_preferences' to modify a user's notification preferences.
 
 RULES:
 - ACTION ORIENTED: Call tools immediately with defaults (date=today, merchant=Unknown) if details are missing.
+- TRANSFER VS SAVINGS GOAL: If the destination target matches any registered bank account name or slug (like 'emergency_fund' / "Emergency Fund", 'joint_current' / "Joint Account"), you MUST use the 'transfer' tool. Only use 'update_savings_goal' or 'create_savings_goal' if the user explicitly refers to a virtual savings target, goal progress, or goal creation.
 - NUMBERS ONLY: Use raw floats.
 - LANGUAGE: ALWAYS respond in the user's language.
 """
 
 analyst_prompt = """You are the Financial Analyst. 
-Your role is to READ and SYNTHESIZE data: balances, budgets, splits, reports, recurring schedules, and notifications/alerts.
+Your role is to READ and SYNTHESIZE data: balances, budgets, splits, reports, recurring schedules, notifications/alerts, invitations, and notification preferences.
 
 WORKFLOWS:
 1. OVERVIEW/REPORT: Always use 'generate_report' for summaries or "how am I doing" queries.
@@ -67,6 +74,8 @@ WORKFLOWS:
 3. BALANCES: Use 'get_balances' for current status.
 4. RECURRING SCHEDULES: Use 'list_recurring_transactions' to list scheduled recurring entries.
 5. ALERTS/NOTIFICATIONS: Use 'list_notifications' to see recent warnings, system alerts, or budget violations.
+6. INVITATIONS: Use 'list_invitations' to list existing invitations in a workspace.
+7. PREFERENCES: Use 'get_notification_preferences' to view notification preferences for a specific user.
 
 RULES:
 - DATA ONLY: Never guess values. Always call your tools first.
@@ -79,8 +88,8 @@ Your role is to greet the user. Only for greetings and small talk."""
 supervisor_prompt = """You are the Supervisor of a Financial AI team. 
 Analyze the conversation history. If all tasks or questions requested by the user have been answered, confirmed, or resolved in the history, you MUST return 'FINISH'.
 Otherwise, choose the next expert who needs to act:
-- If there are pending database updates (creating transactions, transfers, savings goals) -> 'data_agent'.
-- If there are pending reads/reports (summaries, balances, budget status, splits) -> 'analyst_agent'.
+- If there are pending database updates (creating transactions, transfers, savings goals, workspace invitations, updating notification preferences) -> 'data_agent'.
+- If there are pending reads/reports (summaries, balances, budget status, splits, listing invitations, viewing notification preferences) -> 'analyst_agent'.
 - Greetings / small talk only -> 'general_agent'.
 
 Respond ONLY with: data_agent, analyst_agent, general_agent, or FINISH."""
@@ -118,22 +127,33 @@ def supervisor_node(state: AgentState):
             
     messages_for_llm = [SystemMessage(content=supervisor_prompt)] + cleaned_messages
     
+    # We invoke the LLM directly without structured output to bypass tool calling / API validation bugs on Groq
     try:
-        llm_with_router = llm.with_structured_output(SupervisorResponse)
-        response = llm_with_router.invoke(messages_for_llm)
-        decision = response.next_agent
-    except Exception as e:
-        print(f"[SUPERVISOR ERROR] Fallback routing due to: {e}")
         res = llm.invoke(messages_for_llm)
-        content = res.content.lower()
-        if "data" in content or "saisie" in content or "data_agent" in content or "data-agent" in content:
+        content = res.content.lower().strip()
+    except Exception as e:
+        print(f"[SUPERVISOR ERROR] API invocation failed: {e}")
+        content = ""
+        
+    # Standard fallback parsing
+    if "data_agent" in content or "data-agent" in content:
+        decision = "data_agent"
+    elif "analyst_agent" in content or "analyst-agent" in content:
+        decision = "analyst_agent"
+    elif "general_agent" in content or "general-agent" in content:
+        decision = "general_agent"
+    elif "finish" in content:
+        decision = "FINISH"
+    else:
+        # Keyword-based heuristics if model output is conversational
+        if "data" in content or "saisie" in content or "invite" in content or "transcr" in content or "ticket" in content or "reçu" in content or "enregistr" in content:
             decision = "data_agent"
-        elif "analyst" in content or "analyse" in content or "analyst_agent" in content or "analyst-agent" in content:
+        elif "analyst" in content or "analyse" in content or "split" in content or "rapport" in content or "balance" in content or "solde" in content:
             decision = "analyst_agent"
-        elif "general" in content or "concierge" in content or "general_agent" in content or "general-agent" in content:
+        elif "general" in content or "hi" in content or "hello" in content or "bonjour" in content:
             decision = "general_agent"
         else:
-            decision = "FINISH"
+            decision = "analyst_agent" # default fallback
 
     print(f"[SUPERVISOR] Route -> {decision}")
 

@@ -3,9 +3,11 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Union
 from langchain_core.tools import tool
 from openai import OpenAI
+from groq import Groq
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
-from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel, SavingsGoalModel, UserModel, WorkspaceModel, SplitRuleModel, RecurringTransactionModel, NotificationModel
+from database import SessionLocal, AccountModel, TransactionModel, CategoryModel, BudgetRuleModel, SavingsGoalModel, UserModel, WorkspaceModel, SplitRuleModel, RecurringTransactionModel, NotificationModel, InvitationModel
 from datetime import datetime, date, timedelta
 import calendar
 import csv
@@ -115,8 +117,8 @@ def categorize(workspace_id: str, category_name: str) -> str:
         name_lower = category_name.lower().strip()
         keyword_mapping = {
             "grocery": "cat_groceries", "groceries": "cat_groceries", "supermarket": "cat_groceries",
-            "marjane": "cat_groceries", "carrefour": "cat_groceries", "bim": "cat_groceries", 
-            "acima": "cat_groceries", "hanoute": "cat_groceries", "épicerie": "cat_groceries", "souk": "cat_groceries",
+            "marjane": "cat_groceries", "carrefour": "cat_groceries", "bim": "cat_groceries",
+            "hanoute": "cat_groceries", "épicerie": "cat_groceries", "souk": "cat_groceries",
             "rent": "cat_rent", "loyer": "cat_rent", "apartment": "cat_rent",
             "utilities": "cat_utilities", "utility": "cat_utilities", "lydec": "cat_utilities", 
             "onee": "cat_utilities", "electricity": "cat_utilities", "water": "cat_utilities", 
@@ -154,7 +156,7 @@ def categorize(workspace_id: str, category_name: str) -> str:
                 return c.id
                 
         cat_list = ", ".join([f"{c.name} (ID: {c.id})" for c in categories])
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
         prompt = f"Given the category list: [{cat_list}], which ID best matches: '{category_name}'? Return ONLY the ID (e.g., cat_groceries). If no match, return 'cat_leisure'."
         response = llm.invoke(prompt)
         matched_id = response.content.strip()
@@ -219,16 +221,25 @@ def check_budget(workspace_id: str, category_id: str, date: Optional[str] = None
 
 class CreateTransactionSchema(BaseModel):
     account_slug: str = Field(description="Account slug (e.g. main_current)")
-    amount: float = Field(description="Amount: POSITIVE for expenses, NEGATIVE for income.")
+    amount: Union[float, str] = Field(description="Amount: POSITIVE for expenses, NEGATIVE for income.")
     date: str = Field(description="YYYY-MM-DD")
     merchant: str = Field(description="Merchant name")
     category_id: str = Field(description="MUST be a valid category ID (e.g. cat_groceries). Call categorize first if unsure.")
     paid_by: str = Field(description="User ID")
     note: str = ""
-    is_shared: bool = Field(default=False, description="Set to True if this is a personal account expense that should be split with the workspace.")
+    is_shared: Union[bool, str] = Field(default=False, description="Set to True if this is a personal account expense that should be split with the workspace.")
 
 @tool(args_schema=CreateTransactionSchema)
-def create_transaction(account_slug: str, amount: float, date: str, merchant: str, category_id: str, paid_by: str, note: str = "", is_shared: bool = False) -> str:
+def create_transaction(account_slug: str, amount: Union[float, str], date: str, merchant: str, category_id: str, paid_by: str, note: str = "", is_shared: Union[bool, str] = False) -> str:
+    """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
+    # Coerce parameters to correct types robustly
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: amount must be a number, got '{amount}'"
+    if isinstance(is_shared, str):
+        is_shared = is_shared.lower().strip() in ["true", "1", "yes", "on"]
     """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
     db = SessionLocal()
     try:
@@ -260,14 +271,17 @@ def create_transaction(account_slug: str, amount: float, date: str, merchant: st
         })
         
         if "CRITICAL" in budget_info:
-            notif = NotificationModel(
-                workspace_id=account.workspace_id,
-                message=f"CRITICAL Budget Alert: {budget_info}",
-                timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                is_read=False
-            )
-            db.add(notif)
-            db.commit()
+            from database import NotificationPreferenceModel
+            user_pref = db.query(NotificationPreferenceModel).filter(NotificationPreferenceModel.user_id == paid_by).first()
+            if not user_pref or user_pref.budget_alerts_enabled:
+                notif = NotificationModel(
+                    workspace_id=account.workspace_id,
+                    message=f"CRITICAL Budget Alert: {budget_info}",
+                    timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    is_read=False
+                )
+                db.add(notif)
+                db.commit()
         
         return f"Success: Logged {amount} {account.currency} at {merchant} on {account.name}. New balance: {account.balance} {account.currency}. {budget_info}"
     except Exception as e:
@@ -279,14 +293,24 @@ def create_transaction(account_slug: str, amount: float, date: str, merchant: st
 class CreateSavingsGoalSchema(BaseModel):
     workspace_id: str
     name: str
-    target: float
+    target: Union[float, str]
     target_date: str
     category: str = Field(default="General", description="Category of the goal")
-    account_id: Optional[int] = Field(default=None, description="Optional ID of the savings account to link.")
+    account_id: Optional[Union[int, str]] = Field(default=None, description="Optional ID of the savings account to link.")
 
 @tool(args_schema=CreateSavingsGoalSchema)
-def create_savings_goal(workspace_id: str, name: str, target: float, target_date: str, category: str = "General", account_id: Optional[int] = None) -> str:
+def create_savings_goal(workspace_id: str, name: str, target: Union[float, str], target_date: str, category: str = "General", account_id: Optional[Union[int, str]] = None) -> str:
     """Create a new savings goal bucket. target MUST be a number."""
+    if isinstance(target, str):
+        try:
+            target = float(target.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: target must be a number, got '{target}'"
+    if isinstance(account_id, str):
+        try:
+            account_id = int(account_id.strip()) if account_id.strip() else None
+        except ValueError:
+            account_id = None
     db = SessionLocal()
     try:
         goal = SavingsGoalModel(workspace_id=workspace_id, name=name, target=target, target_date=target_date, category=category, account_id=account_id)
@@ -313,13 +337,23 @@ def list_savings_goals(workspace_id: str) -> str:
 
 class UpdateSavingsGoalSchema(BaseModel):
     workspace_id: str
-    amount: float
-    goal_id: Optional[int] = Field(default=None, description="Goal ID")
+    amount: Union[float, str]
+    goal_id: Optional[Union[int, str]] = Field(default=None, description="Goal ID")
     goal_name: Optional[str] = Field(default=None, description="Goal Name")
 
 @tool(args_schema=UpdateSavingsGoalSchema)
-def update_savings_goal(workspace_id: str, amount: float, goal_id: Optional[int] = None, goal_name: Optional[str] = None) -> str:
+def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None) -> str:
     """Add money to a goal by ID or name. amount MUST be a number."""
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: amount must be a number, got '{amount}'"
+    if isinstance(goal_id, str):
+        try:
+            goal_id = int(goal_id.strip()) if goal_id.strip() else None
+        except ValueError:
+            goal_id = None
     db = SessionLocal()
     try:
         query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
@@ -554,10 +588,10 @@ class TranscribeAudioSchema(BaseModel):
 def transcribe_audio(audio_file_path: str) -> str:
     """Speech-to-text on a voice note; returns the transcript."""
     try:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         with open(audio_file_path, "rb") as audio_file:
             transcript = client.audio.transcriptions.create(
-                model="whisper-1", 
+                model="whisper-large-v3", 
                 file=audio_file
             )
         return f"Transcription successful: {transcript.text}"
@@ -571,7 +605,7 @@ class ParseReceiptSchema(BaseModel):
 def parse_receipt_image(base64_image: str) -> str:
     """Vision call: extract merchant, total, date, line items from a receipt photo."""
     try:
-        vision_llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+        vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
         
         prompt = """
         You are an expert accountant. Analyze this receipt and extract the following information in JSON format:
@@ -608,12 +642,17 @@ def parse_receipt_image(base64_image: str) -> str:
 class TransferSchema(BaseModel):
     source_slug: str = Field(description="The slug of the account to take money FROM.")
     dest_slug: str = Field(description="The slug of the account to send money TO.")
-    amount: float = Field(description="The amount of money to transfer (must be positive).")
+    amount: Union[float, str] = Field(description="The amount of money to transfer (must be positive).")
     initiated_by: str = Field(default="user_mohamed", description="The user ID of the person making the transfer.")
 
 @tool(args_schema=TransferSchema)
-def transfer(source_slug: str, dest_slug: str, amount: float, initiated_by: str = "user_mohamed") -> str:
+def transfer(source_slug: str, dest_slug: str, amount: Union[float, str], initiated_by: str = "user_mohamed") -> str:
     """Move money between any two accounts within the workspace. Logs transaction history."""
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: amount must be a number, got '{amount}'"
     if amount <= 0:
         return "Error: Transfer amount must be positive."
         
@@ -700,15 +739,20 @@ def read_csv_file(file_path: str) -> str:
 class CreateRecurringTransactionSchema(BaseModel):
     workspace_id: str = Field(..., description="The ID of the workspace.")
     name: str = Field(..., description="The name of the subscription/transaction.")
-    amount: float = Field(..., description="The positive amount for expenses, negative for income.")
+    amount: Union[float, str] = Field(..., description="The positive amount for expenses, negative for income.")
     category_id: str = Field(..., description="Category ID for the transaction.")
     account_slug: str = Field(..., description="The account slug to pay from (e.g. main_current).")
     frequency: str = Field(..., description="Frequency of the transaction: 'weekly' or 'monthly'.")
     start_date: str = Field(..., description="Start date in YYYY-MM-DD format.")
 
 @tool(args_schema=CreateRecurringTransactionSchema)
-def create_recurring_transaction(workspace_id: str, name: str, amount: float, category_id: str, account_slug: str, frequency: str, start_date: str) -> str:
+def create_recurring_transaction(workspace_id: str, name: str, amount: Union[float, str], category_id: str, account_slug: str, frequency: str, start_date: str) -> str:
     """Schedule a recurring weekly or monthly subscription/transaction."""
+    if isinstance(amount, str):
+        try:
+            amount = float(amount.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: amount must be a number, got '{amount}'"
     db = SessionLocal()
     try:
         account = db.query(AccountModel).filter(AccountModel.slug == account_slug).first()
@@ -1024,7 +1068,277 @@ def delete_recurring_transaction(recurring_transaction_id: Union[int, str]) -> s
     finally:
         db.close()
 
-data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, categorize, transcribe_audio, parse_receipt_image, create_recurring_transaction, import_bank_csv, process_recurring_transactions, delete_recurring_transaction]
-analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget, list_recurring_transactions, list_notifications]
+class CreateWorkspaceInviteSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace to invite the user to.")
+    email: str = Field(..., description="The email address of the user being invited.")
+    name: str = Field(..., description="The name of the user being invited.")
+    role: str = Field(default="member", description="The role of the invited user (e.g. member, guest, admin).")
+    income_mad: Union[float, str] = Field(default=0.0, description="The monthly income of the invited user in MAD.")
+
+@tool(args_schema=CreateWorkspaceInviteSchema)
+def create_workspace_invite(workspace_id: str, email: str, name: str, role: str = "member", income_mad: Union[float, str] = 0.0) -> str:
+    """Create a workspace invitation for a new member, generating a unique registration/join token link."""
+    if isinstance(income_mad, str):
+        try:
+            income_mad = float(income_mad.replace(",", ".").replace(" ", "").strip())
+        except ValueError:
+            return f"Error: income_mad must be a number, got '{income_mad}'"
+    import uuid
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return f"Error: Workspace '{workspace_id}' not found."
+        
+        token = str(uuid.uuid4())
+        
+        invite = InvitationModel(
+            workspace_id=workspace_id,
+            email=email,
+            name=name,
+            token=token,
+            role=role,
+            income_mad=income_mad,
+            is_accepted=False
+        )
+        db.add(invite)
+        db.commit()
+        
+        accept_url = f"http://127.0.0.1:8000/invite/accept?token={token}"
+        return f"Success: Workspace invitation created for {name} ({email}) under role '{role}' with income {income_mad} MAD.\nAcceptance URL: {accept_url}"
+    except Exception as e:
+        db.rollback()
+        return f"Error creating invitation: {str(e)}"
+    finally:
+        db.close()
+
+class ListInvitationsSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace to list invitations for.")
+
+@tool(args_schema=ListInvitationsSchema)
+def list_invitations(workspace_id: str) -> str:
+    """List all workspace invitations (both pending and accepted)."""
+    db = SessionLocal()
+    try:
+        invites = db.query(InvitationModel).filter(InvitationModel.workspace_id == workspace_id).all()
+        if not invites:
+            return f"No invitations found for workspace '{workspace_id}'."
+        
+        output = f"Invitations for workspace '{workspace_id}':\n"
+        for inv in invites:
+            status = "Accepted" if inv.is_accepted else "Pending"
+            output += f"- Name: {inv.name} | Email: {inv.email} | Role: {inv.role} | Income: {inv.income_mad} MAD | Status: {status} | Token: {inv.token}\n"
+        return output
+    except Exception as e:
+        return f"Error listing invitations: {str(e)}"
+    finally:
+        db.close()
+
+class GetNotificationPreferencesSchema(BaseModel):
+    user_id: str = Field(..., description="The ID of the user whose notification preferences to retrieve.")
+
+@tool(args_schema=GetNotificationPreferencesSchema)
+def get_notification_preferences(user_id: str) -> str:
+    """Retrieve the notification preferences for a specific user."""
+    from database import NotificationPreferenceModel
+    db = SessionLocal()
+    try:
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            return f"Error: User '{user_id}' not found."
+        
+        pref = db.query(NotificationPreferenceModel).filter(NotificationPreferenceModel.user_id == user_id).first()
+        if not pref:
+            pref = NotificationPreferenceModel(user_id=user_id)
+            db.add(pref)
+            db.commit()
+            
+        return f"Notification Preferences for {user.name} ({user_id}):\n" \
+               f"- Budget Alerts: {'Enabled' if pref.budget_alerts_enabled else 'Disabled'}\n" \
+               f"- Recurring Transactions alerts: {'Enabled' if pref.recurring_tx_enabled else 'Disabled'}\n" \
+               f"- CSV Statement Import logs: {'Enabled' if pref.csv_import_enabled else 'Disabled'}\n" \
+               f"- Browser Push/Desktop notifications: {'Enabled' if pref.browser_push_enabled else 'Disabled'}"
+    except Exception as e:
+        return f"Error retrieving preferences: {str(e)}"
+    finally:
+        db.close()
+
+class UpdateNotificationPreferencesSchema(BaseModel):
+    user_id: str = Field(..., description="The ID of the user whose notification preferences to update.")
+    budget_alerts_enabled: Optional[Union[bool, str]] = Field(default=None, description="Enable or disable budget alerts notifications.")
+    recurring_tx_enabled: Optional[Union[bool, str]] = Field(default=None, description="Enable or disable recurring transactions alerts.")
+    csv_import_enabled: Optional[Union[bool, str]] = Field(default=None, description="Enable or disable CSV statement import logs.")
+    browser_push_enabled: Optional[Union[bool, str]] = Field(default=None, description="Enable or disable browser push/desktop notifications.")
+
+@tool(args_schema=UpdateNotificationPreferencesSchema)
+def update_notification_preferences(
+    user_id: str,
+    budget_alerts_enabled: Optional[Union[bool, str]] = None,
+    recurring_tx_enabled: Optional[Union[bool, str]] = None,
+    csv_import_enabled: Optional[Union[bool, str]] = None,
+    browser_push_enabled: Optional[Union[bool, str]] = None
+) -> str:
+    """Update notification preferences for a specific user."""
+    def parse_bool(val):
+        if val is None: return None
+        if isinstance(val, bool): return val
+        return val.lower().strip() in ["true", "1", "yes", "on"]
+        
+    budget_alerts_enabled = parse_bool(budget_alerts_enabled)
+    recurring_tx_enabled = parse_bool(recurring_tx_enabled)
+    csv_import_enabled = parse_bool(csv_import_enabled)
+    browser_push_enabled = parse_bool(browser_push_enabled)
+    from database import NotificationPreferenceModel
+    db = SessionLocal()
+    try:
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            return f"Error: User '{user_id}' not found."
+            
+        pref = db.query(NotificationPreferenceModel).filter(NotificationPreferenceModel.user_id == user_id).first()
+        if not pref:
+            pref = NotificationPreferenceModel(user_id=user_id)
+            db.add(pref)
+            
+        changes = []
+        if budget_alerts_enabled is not None:
+            pref.budget_alerts_enabled = budget_alerts_enabled
+            changes.append(f"Budget Alerts: {'Enabled' if budget_alerts_enabled else 'Disabled'}")
+        if recurring_tx_enabled is not None:
+            pref.recurring_tx_enabled = recurring_tx_enabled
+            changes.append(f"Recurring Transactions alerts: {'Enabled' if recurring_tx_enabled else 'Disabled'}")
+        if csv_import_enabled is not None:
+            pref.csv_import_enabled = csv_import_enabled
+            changes.append(f"CSV Statement Import logs: {'Enabled' if csv_import_enabled else 'Disabled'}")
+        if browser_push_enabled is not None:
+            pref.browser_push_enabled = browser_push_enabled
+            changes.append(f"Browser Push/Desktop: {'Enabled' if browser_push_enabled else 'Disabled'}")
+            
+        db.commit()
+        if not changes:
+            return f"No preference updates provided for user '{user_id}'."
+        return f"Success: Updated notification preferences for {user.name} ({user_id}):\n" + "\n".join([f"- {c}" for c in changes])
+    except Exception as e:
+        db.rollback()
+        return f"Error updating preferences: {str(e)}"
+    finally:
+        db.close()
+
+class DeleteSavingsGoalSchema(BaseModel):
+    workspace_id: str = Field(description="The ID of the workspace.")
+    goal_id: Optional[Union[int, str]] = Field(default=None, description="The ID of the savings goal to delete.")
+    goal_name: Optional[str] = Field(default=None, description="The name of the savings goal to delete.")
+
+@tool(args_schema=DeleteSavingsGoalSchema)
+def delete_savings_goal(workspace_id: str, goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None) -> str:
+    """Delete a savings goal entirely from the database by ID or name."""
+    db = SessionLocal()
+    try:
+        query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
+        if goal_id is not None:
+            if isinstance(goal_id, str):
+                try:
+                    goal_id = int(goal_id.strip()) if goal_id.strip() else None
+                except ValueError:
+                    goal_id = None
+            if goal_id is not None:
+                goal = query.filter(SavingsGoalModel.id == goal_id).first()
+            else:
+                goal = None
+        elif goal_name:
+            goal = query.filter(SavingsGoalModel.name.ilike(f"%{goal_name}%")).first()
+        else:
+            return "Error: Provide goal_id or goal_name to delete."
+            
+        if not goal:
+            return f"Error: Savings goal not found in workspace '{workspace_id}'."
+            
+        name = goal.name
+        db.delete(goal)
+        db.commit()
+        return f"Success: Savings goal '{name}' has been deleted."
+    except Exception as e:
+        db.rollback()
+        return f"Error deleting savings goal: {str(e)}"
+    finally:
+        db.close()
+
+class UpdateSavingsGoalPropertiesSchema(BaseModel):
+    workspace_id: str = Field(description="The ID of the workspace.")
+    goal_id: Optional[Union[int, str]] = Field(default=None, description="The ID of the savings goal to modify.")
+    goal_name: Optional[str] = Field(default=None, description="The name of the savings goal to modify.")
+    new_name: Optional[str] = Field(default=None, description="The new name for the goal.")
+    new_target: Optional[Union[float, str]] = Field(default=None, description="The new target amount for the goal.")
+    new_target_date: Optional[str] = Field(default=None, description="The new target date for the goal (YYYY-MM-DD or YYYY-MM).")
+    new_category: Optional[str] = Field(default=None, description="The new category for the goal.")
+
+@tool(args_schema=UpdateSavingsGoalPropertiesSchema)
+def update_savings_goal_properties(
+    workspace_id: str,
+    goal_id: Optional[Union[int, str]] = None,
+    goal_name: Optional[str] = None,
+    new_name: Optional[str] = None,
+    new_target: Optional[Union[float, str]] = None,
+    new_target_date: Optional[str] = None,
+    new_category: Optional[str] = None
+) -> str:
+    """Modify details of an existing savings goal (like changing its target date, name, target amount, or category) by ID or name."""
+    db = SessionLocal()
+    try:
+        query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
+        if goal_id is not None:
+            if isinstance(goal_id, str):
+                try:
+                    goal_id = int(goal_id.strip()) if goal_id.strip() else None
+                except ValueError:
+                    goal_id = None
+            if goal_id is not None:
+                goal = query.filter(SavingsGoalModel.id == goal_id).first()
+            else:
+                goal = None
+        elif goal_name:
+            goal = query.filter(SavingsGoalModel.name.ilike(f"%{goal_name}%")).first()
+        else:
+            return "Error: Provide goal_id or goal_name to identify the goal."
+            
+        if not goal:
+            return f"Error: Savings goal not found."
+            
+        changes = []
+        if new_name:
+            old_name = goal.name
+            goal.name = new_name
+            changes.append(f"name renamed from '{old_name}' to '{new_name}'")
+        if new_target is not None:
+            if isinstance(new_target, str):
+                new_target = float(new_target.replace(",", ".").replace(" ", "").strip())
+            old_target = goal.target
+            goal.target = new_target
+            changes.append(f"target changed from {old_target} to {new_target}")
+        if new_target_date:
+            old_date = goal.target_date
+            date_val = new_target_date.strip()
+            if len(date_val) == 7: # YYYY-MM
+                date_val = f"{date_val}-01"
+            goal.target_date = date_val
+            changes.append(f"target date changed from '{old_date}' to '{date_val}'")
+        if new_category:
+            old_cat = goal.category
+            goal.category = new_category
+            changes.append(f"category changed from '{old_cat}' to '{new_category}'")
+            
+        if not changes:
+            return "No updates were provided."
+            
+        db.commit()
+        return f"Success: Updated savings goal '{goal.name}': " + ", ".join(changes)
+    except Exception as e:
+        db.rollback()
+        return f"Error updating savings goal properties: {str(e)}"
+    finally:
+        db.close()
+
+data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, delete_savings_goal, update_savings_goal_properties, categorize, transcribe_audio, parse_receipt_image, create_recurring_transaction, import_bank_csv, process_recurring_transactions, delete_recurring_transaction, create_workspace_invite, update_notification_preferences]
+analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget, list_recurring_transactions, list_notifications, list_invitations, get_notification_preferences]
 
 budget_tools = data_tools + analyst_tools

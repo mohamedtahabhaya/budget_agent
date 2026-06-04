@@ -6,14 +6,14 @@ from dotenv import load_dotenv
 # Add the project directory to path so we can import from database and finance_tools
 sys.path.append("/Users/mohamed-taha/Documents/budget_agent")
 load_dotenv()
+os.environ["DATABASE_URL"] = "sqlite:///test_budget.db"
 
-
-from database import SessionLocal, Base, engine, WorkspaceModel, UserModel, AccountModel, CategoryModel, TransactionModel, BudgetRuleModel, SplitRuleModel, RecurringTransactionModel, NotificationModel
+from database import SessionLocal, Base, engine, WorkspaceModel, UserModel, AccountModel, CategoryModel, TransactionModel, BudgetRuleModel, SplitRuleModel, RecurringTransactionModel, NotificationModel, InvitationModel, NotificationPreferenceModel
 from finance_tools import (
     create_transaction, check_budget, compute_split, transfer, 
     generate_report, list_recent_transactions, create_recurring_transaction,
     list_recurring_transactions, process_recurring_transactions,
-    import_bank_csv, list_notifications
+    import_bank_csv, list_notifications, create_workspace_invite, list_invitations
 )
 
 def setup_test_db():
@@ -28,6 +28,8 @@ def setup_test_db():
         db.query(SplitRuleModel).delete()
         db.query(RecurringTransactionModel).delete()
         db.query(NotificationModel).delete()
+        db.query(InvitationModel).delete()
+        db.query(NotificationPreferenceModel).delete()
         db.commit()
         
         # 1. Create Workspace
@@ -257,9 +259,78 @@ def test_notifications():
         assert "CRITICAL" in notifs[0].message, f"Expected CRITICAL warning, got {notifs[0].message}"
         assert notifs[0].is_read == True, "Expected notification to be marked as read after listing"
 
+def test_workspace_invitations():
+    print("\n--- Testing Workspace Invitations & Acceptance Flow ---")
+    
+    # 1. Create a workspace invitation
+    print("Creating invitation for a new member...")
+    res = create_workspace_invite.invoke({
+        "workspace_id": "ws_test",
+        "email": "nabil@example.com",
+        "name": "Nabil",
+        "role": "member",
+        "income_mad": 12000.0
+    })
+    print(res)
+    assert "Success:" in res, "Failed to create invitation"
+    
+    # 2. Verify invitation created in DB and fetch token
+    with SessionLocal() as db:
+        invite = db.query(InvitationModel).filter(InvitationModel.email == "nabil@example.com").first()
+        assert invite is not None, "Invitation not found in DB"
+        assert invite.is_accepted == False, "Invitation should be pending"
+        token = invite.token
+        print(f"Verified invitation in DB. Token is: {token}")
+        
+    # 3. List invitations tool
+    print("\nListing invitations:")
+    list_res = list_invitations.invoke({"workspace_id": "ws_test"})
+    print(list_res)
+    assert "Nabil" in list_res, "List invitations should contain invited user name"
+    assert "Pending" in list_res, "Invitation should be shown as pending"
+    
+    # 4. Simulate acceptance via FastAPI TestClient
+    from fastapi.testclient import TestClient
+    from api import app
+    
+    client = TestClient(app)
+    
+    print("\nSimulating accept invitation request...")
+    response = client.get(f"/invite/accept?token={token}")
+    assert response.status_code == 200, f"Expected status 200, got {response.status_code}"
+    assert "Congratulations" in response.text, "Acceptance response should render confirmation HTML"
+    print("Accepted invitation successfully.")
+    
+    # 5. Verify database changes
+    with SessionLocal() as db:
+        invite = db.query(InvitationModel).filter(InvitationModel.token == token).first()
+        assert invite.is_accepted == True, "Invitation status should be updated to accepted"
+        
+        new_user = db.query(UserModel).filter(UserModel.email == "nabil@example.com").first()
+        assert new_user is not None, "New user should be registered in DB"
+        assert new_user.name == "Nabil", f"Expected name 'Nabil', got {new_user.name}"
+        assert new_user.workspace_id == "ws_test", "New user should be linked to ws_test workspace"
+        assert new_user.role == "member", f"Expected role 'member', got {new_user.role}"
+        assert new_user.income_mad == 12000.0, f"Expected income 12000.0, got {new_user.income_mad}"
+        print(f"Verified new user successfully added to DB with ID: {new_user.id}")
+        
+    # 6. Test already accepted invitation
+    print("\nSimulating duplicate accept invitation request...")
+    dup_response = client.get(f"/invite/accept?token={token}")
+    assert dup_response.status_code == 200
+    assert "Already a Member" in dup_response.text, "Should display already a member screen"
+    
+    # 7. Test invalid token
+    print("\nSimulating invalid token acceptance...")
+    err_response = client.get("/invite/accept?token=invalid_token_xyz")
+    assert err_response.status_code == 404
+    assert "Not Found" in err_response.text, "Should display not found screen"
+    print("All invitation tests passed successfully!")
+
 if __name__ == "__main__":
     setup_test_db()
     test_recurring_transactions()
     test_csv_imports()
     test_notifications()
+    test_workspace_invitations()
     print("\nAll tests completed successfully!")

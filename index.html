@@ -1,316 +1,1192 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My AI Agent</title>
+    <title>Budget Agent Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .chat-container { background: white; width: 100%; max-width: 500px; height: 80vh; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; }
-        .chat-header { background: #007bff; color: white; padding: 15px; text-align: center; font-weight: bold; font-size: 1.2em; }
-        .chat-messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-        .message { max-width: 80%; padding: 12px 16px; border-radius: 15px; line-height: 1.4; }
-        .message.user { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 4px; }
-        .message.bot { background: #e9ecef; color: black; align-self: flex-start; border-bottom-left-radius: 4px; white-space: pre-wrap;}
-        .loading { font-style: italic; color: #6c757d; font-size: 0.9em; align-self: flex-start; display: none; }
-        .chat-input-area { display: flex; padding: 15px; border-top: 1px solid #dee2e6; background: #fff; }
-        input[type="text"] { flex: 1; padding: 12px; border: 1px solid #ced4da; border-radius: 20px; outline: none; font-size: 1em; }
-        button { background: #007bff; color: white; border: none; padding: 0 20px; margin-left: 10px; border-radius: 20px; cursor: pointer; font-weight: bold; transition: background 0.2s; }
-        button:hover { background: #0056b3; }
+        :root {
+            --bg-main: #0b0f19;
+            --bg-card: rgba(22, 28, 45, 0.6);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --danger: #f43f5e;
+            --warning: #fbbf24;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top left, #111827, #090b11);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            width: 95%;
+            max-width: 1200px;
+            height: 90vh;
+            background: rgba(17, 24, 39, 0.7);
+            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border-color);
+            border-radius: 28px;
+            overflow: hidden;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.6);
+        }
+
+        /* LEFT PANEL: DASHBOARD */
+        .left-panel {
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+            overflow-y: auto;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-header h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.8em;
+            margin: 0;
+            background: linear-gradient(135deg, #ffffff, #9ca3af);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .workspace-badge {
+            background: rgba(59, 130, 246, 0.15);
+            color: #60a5fa;
+            padding: 6px 14px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+
+        .section-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #e5e7eb;
+        }
+
+        /* Widgets Grid */
+        .widget-section {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .accounts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+        }
+
+        .account-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 20px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .account-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+        }
+
+        .account-card.personal::before { background: var(--primary); }
+        .account-card.shared::before { background: var(--success); }
+        .account-card.savings::before { background: var(--warning); }
+
+        .account-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.3);
+        }
+
+        .account-name {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .account-balance {
+            font-family: 'Outfit', sans-serif;
+            font-size: 1.6em;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .account-type {
+            font-size: 0.75em;
+            color: var(--text-muted);
+            margin-top: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Savings goals cards */
+        .goals-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        .goal-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 16px 20px;
+        }
+
+        .goal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+        }
+
+        .goal-name { font-weight: 600; color: #fff; }
+        .goal-date { font-size: 0.8em; color: var(--text-muted); }
+
+        .progress-bar-container {
+            height: 8px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--success));
+            border-radius: 4px;
+            transition: width 0.8s ease-in-out;
+        }
+
+        .goal-math {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8em;
+            color: var(--text-muted);
+        }
+
+        /* Preference Widget */
+        .pref-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 20px;
+        }
+
+        .pref-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .pref-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .pref-row:first-child {
+            padding-top: 0;
+        }
+
+        .pref-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pref-label {
+            font-size: 0.9em;
+            font-weight: 500;
+            color: #e5e7eb;
+        }
+
+        .pref-desc {
+            font-size: 0.75em;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Toggle switches */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 44px;
+            height: 24px;
+        }
+
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(255,255,255,0.1);
+            transition: .3s;
+            border-radius: 24px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background-color: #fff;
+            transition: .3s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: var(--primary);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+
+        /* Alerts List */
+        .alerts-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .alert-item {
+            background: rgba(244, 63, 94, 0.05);
+            border: 1px solid rgba(244, 63, 94, 0.15);
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 0.85em;
+        }
+
+        .alert-item.info {
+            background: rgba(59, 130, 246, 0.05);
+            border-color: rgba(59, 130, 246, 0.15);
+        }
+
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: 600;
+        }
+
+        .alert-msg { color: #f3f4f6; }
+        .alert-time { font-size: 0.8em; color: var(--text-muted); }
+
+        /* RIGHT PANEL: CHAT */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+            background: rgba(10, 12, 20, 0.5);
+        }
+
+        .chat-header {
+            background: rgba(17, 24, 39, 0.4);
+            border-bottom: 1px solid var(--border-color);
+            padding: 20px 24px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            font-size: 1.2em;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .agent-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7em;
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+            padding: 4px 10px;
+            border-radius: 20px;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            background-color: var(--success);
+            border-radius: 50%;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .chat-messages {
+            flex: 1;
+            min-height: 0;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 14px 18px;
+            border-radius: 20px;
+            line-height: 1.5;
+            font-size: 0.95em;
+        }
+
+        .message.user {
+            background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+            color: #fff;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+        }
+
+        .message.bot {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            color: #e5e7eb;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.bot p { margin: 0 0 8px; }
+        .message.bot p:last-child { margin-bottom: 0; }
+        .message.bot code { background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; font-family: monospace; font-size: 0.9em; color: #f472b6; }
+        .message.bot pre { background: rgba(0,0,0,0.3); padding: 12px; border-radius: 12px; overflow-x: auto; border: 1px solid rgba(255,255,255,0.05); }
+        .message.bot pre code { background: transparent; padding: 0; color: #e5e7eb; }
+
+        .chat-input-area {
+            padding: 20px;
+            border-top: 1px solid var(--border-color);
+            background: rgba(10, 12, 20, 0.8);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .input-wrapper {
+            position: relative;
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 14px 20px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            color: #fff;
+            outline: none;
+            font-size: 0.95em;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            border-color: rgba(59, 130, 246, 0.5);
+            background: rgba(255,255,255,0.06);
+        }
+
+        .input-btn {
+            background: rgba(255, 255, 255, 0.05);
+            color: #fff;
+            border: 1px solid var(--border-color);
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2em;
+            transition: all 0.2s;
+        }
+
+        .input-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: scale(1.05);
+        }
+
+        .input-btn.primary {
+            background: var(--primary);
+            border: none;
+            width: auto;
+            padding: 0 24px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        .input-btn.primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .input-btn.mic-active {
+            background: var(--danger);
+            animation: record-pulse 1.2s infinite;
+        }
+
+        @keyframes record-pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.08); }
+            100% { transform: scale(1); }
+        }
+
         .status-badge {
             display: none;
-            background-color: #ffc107;
-            color: #856404;
-            font-size: 0.85em;
-            font-weight: bold;
-            padding: 5px 12px;
+            background-color: rgba(251, 191, 36, 0.1);
+            color: var(--warning);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            font-size: 0.8em;
+            font-weight: 600;
+            padding: 6px 12px;
             border-radius: 12px;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
             width: fit-content;
-            animation: pulse 1.5s infinite;
+            animation: status-pulse 1.5s infinite;
         }
-        @keyframes pulse {
-            0% { opacity: 0.7; }
+
+        @keyframes status-pulse {
+            0% { opacity: 0.8; }
             50% { opacity: 1; }
-            100% { opacity: 0.7; }
+            100% { opacity: 0.8; }
+        }
+
+        .loading-dots {
+            display: none;
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 0.85em;
+            margin-left: 20px;
+        }
+
+        /* Toast notifications container */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 380px;
+        }
+
+        .toast {
+            background: rgba(244, 63, 94, 0.95);
+            -webkit-backdrop-filter: blur(10px);
+            backdrop-filter: blur(10px);
+            color: white;
+            padding: 16px 20px;
+            border-radius: 16px;
+            box-shadow: 0 15px 30px rgba(0,0,0,0.4);
+            border-left: 5px solid #fff;
+            font-size: 0.9em;
+            animation: slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .toast:hover {
+            transform: scale(1.02);
+        }
+
+        @keyframes slideInRight {
+            from { transform: translateX(110%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+                height: auto;
+                min-height: 100vh;
+                overflow-y: visible;
+            }
+            .left-panel {
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+                height: auto;
+            }
+            .right-panel {
+                height: auto;
+            }
+            .chat-messages {
+                overflow-y: visible;
+                max-height: none;
+            }
         }
     </style>
-</head>
-<body>
+    
+    <script>
+        const maSessionUnique = "session_" + Date.now();
+        let currentBase64Image = null;
+        const activeUserId = "user_mohamed"; // Default demo user
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let audioUnlocked = false;
 
-<div class="chat-container">
-    <div class="chat-header"> AI Agent Custom</div>
-    <div class="chat-messages" id="chat-messages">
-        <div class="message bot">Hi ! Ask me a question.</div>
-        <div class="loading" id="loading">Thinking...</div>
-    </div>
-    <div class="chat-input-area">
-        <button id="mic-btn" onclick="startDictation()" style="background: #28a745; margin-right: 10px; padding: 0 15px; font-size: 1.2em;">🎤</button>
+        // -- DASHBOARD API INTEGRATIONS --
         
-        <input type="file" id="image-upload" accept="image/*" style="display: none;" onchange="handleImageUpload(event)">
-        <button id="upload-btn" onclick="document.getElementById('image-upload').click()" style="background: #6c757d; margin-right: 10px; padding: 0 15px; font-size: 1.2em;">📎</button>
-        <span id="image-preview-text" style="display:none; align-self:center; margin-right:10px; color:#28a745; font-weight:bold;">🖼️ OK</span>
-
-        <input type="text" id="user-input" placeholder="Write your message or speak..." onkeypress="handleKeyPress(event)">
-        <button onclick="sendMessage()">Send</button>
-    </div>
-</div>
-
-<script>
-    const maSessionUnique = "session_" + Date.now();
-    let currentBase64Image = null;
-
-    function handleImageUpload(event) {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            currentBase64Image = e.target.result; 
-            document.getElementById("image-preview-text").style.display = "inline-block";
-            console.log("Image chargée en mémoire !");
-        };
-        reader.readAsDataURL(file);
-    }
-
-    async function sendMessage(audioBase64 = null) {
-        unlockAudio();
-        const inputField = document.getElementById("user-input");
-        const messageText = inputField.value.trim();
-        
-        if (!messageText && !audioBase64) return;
-
-        if (audioBase64) {
-            addMessage("🎤 [Voice Note]", "user");
-        } else {
-            addMessage(messageText, "user");
-            inputField.value = "";
-        }
-        scrollToBottom();
-
-        let isApprov = false;
-        if (!audioBase64) {
-            let textePropre = messageText.trim().toLowerCase();
-            let contientOui = /\b(yes|oui|ok|go|vas-y|send|approuvé|approved|accept)\b/.test(textePropre);
-            let contientNon = /\b(no|non)\b/.test(textePropre);
-            if (contientOui && !contientNon) {
-                isApprov = true;
+        async function fetchAccounts() {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/accounts");
+                const accounts = await response.json();
+                
+                const grid = document.getElementById("accounts-grid");
+                if (!grid) return;
+                grid.innerHTML = "";
+                
+                accounts.forEach(acc => {
+                    const card = document.createElement("div");
+                    card.classList.add("account-card");
+                    
+                    // Add styling class based on type
+                    if (acc.type.includes("savings")) card.classList.add("savings");
+                    else if (acc.type.includes("shared")) card.classList.add("shared");
+                    else card.classList.add("personal");
+                    
+                    card.innerHTML = `
+                        <div class="account-name">${acc.name}</div>
+                        <div class="account-balance">${acc.balance.toLocaleString()} ${acc.currency}</div>
+                        <div class="account-type">${acc.type.replace('_', ' ')}</div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (e) {
+                console.error("Error fetching accounts:", e);
             }
         }
 
-        const chatMessages = document.getElementById("chat-messages");
-        const loadingDiv = document.getElementById("loading");
-        
-        const aiBubble = document.createElement("div");
-        aiBubble.classList.add("message", "bot");
-
-        const aiStatus = document.createElement("div");
-        aiStatus.classList.add("status-badge");
-        aiBubble.appendChild(aiStatus);
-        
-        const aiContent = document.createElement("span");
-        aiContent.innerHTML = "<em>Thinking...</em>";
-        aiBubble.appendChild(aiContent);
-        
-        chatMessages.insertBefore(aiBubble, loadingDiv);
-        scrollToBottom();
-
-        try {
-            const response = await fetch("http://127.0.0.1:8000/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    message: audioBase64 ? "" : messageText,
-                    session_id: maSessionUnique,
-                    is_approval: isApprov,
-                    image_data: currentBase64Image,
-                    audio_data: audioBase64
-                })
-            });
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = "";
-            let rawMarkdown = "";
-            let sentenceBuffer = "";
-            
-            aiContent.innerHTML = "";
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    if (sentenceBuffer.trim().length > 0) {
-                        speakText(sentenceBuffer);
-                    }
-                    break;
+        async function fetchSavingsGoals() {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/savings-goals");
+                const goals = await response.json();
+                
+                const grid = document.getElementById("goals-grid");
+                if (!grid) return;
+                grid.innerHTML = "";
+                
+                if (goals.length === 0) {
+                    grid.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9em; grid-column: span 2;">No savings goals registered.</div>`;
+                    return;
                 }
+                
+                goals.forEach(g => {
+                    const pct = Math.min(100, Math.max(0, (g.current / g.target) * 100));
+                    const card = document.createElement("div");
+                    card.classList.add("goal-card");
+                    card.innerHTML = `
+                        <div class="goal-header">
+                            <span class="goal-name">${g.name}</span>
+                            <span class="goal-date">Until ${g.target_date}</span>
+                        </div>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar-fill" style="width: ${pct}%"></div>
+                        </div>
+                        <div class="goal-math">
+                            <span>${g.current.toLocaleString()} MAD (${pct.toFixed(0)}%)</span>
+                            <span>Target: ${g.target.toLocaleString()} MAD</span>
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                });
+            } catch (e) {
+                console.error("Error fetching savings goals:", e);
+            }
+        }
 
-                buffer += decoder.decode(value, { stream: true });
-                let parts = buffer.split("\n\n");
-                buffer = parts.pop(); 
+        async function fetchNotifications() {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/notifications");
+                const notifications = await response.json();
+                
+                const list = document.getElementById("alerts-list");
+                if (!list) return;
+                list.innerHTML = "";
+                
+                if (notifications.length === 0) {
+                    list.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9em;">No recent alerts.</div>`;
+                    return;
+                }
+                
+                notifications.forEach(n => {
+                    const item = document.createElement("div");
+                    item.classList.add("alert-item");
+                    if (!n.message.includes("CRITICAL")) item.classList.add("info");
+                    
+                    item.innerHTML = `
+                        <div class="alert-header">
+                            <span>Budget</span>
+                            <span class="alert-time">${n.timestamp}</span>
+                        </div>
+                        <div class="alert-msg">${n.message}</div>
+                    `;
+                    list.appendChild(item);
+                });
+            } catch (e) {
+                console.error("Error fetching notifications:", e);
+            }
+        }
 
-                for (let part of parts) {
-                    if (part.startsWith("data: ")) {
-                        try {
-                            let jsonStr = part.substring(6);
-                            let jsonData = JSON.parse(jsonStr);
-                            
-                            if (jsonData.type === "status") {
-                                if (jsonData.content === "done") {
-                                    aiStatus.style.display = "none";
-                                } else {
-                                    aiStatus.style.display = "block";
-                                    aiStatus.textContent = jsonData.content;
-                                    scrollToBottom();
-                                }
-                            } 
-                            else if (jsonData.type === "token" || jsonData.type === "approval") {
-                                rawMarkdown += jsonData.content;
-                                sentenceBuffer += jsonData.content;
-                                if (typeof marked !== 'undefined') {
-                                    aiContent.innerHTML = marked.parse(rawMarkdown);
-                                } else {
-                                    aiContent.innerHTML = rawMarkdown;
-                                }
-                                if (/[.?!:]/.test(jsonData.content) || jsonData.content.includes('\n')) {
-                                    if (sentenceBuffer.trim().length > 0) {
-                                        speakText(sentenceBuffer);
-                                        sentenceBuffer = "";
+        async function fetchPreferences() {
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/preferences/${activeUserId}`);
+                const prefs = await response.json();
+                if (prefs.error) return;
+                
+                const pBudget = document.getElementById("pref-budget");
+                const pRecur = document.getElementById("pref-recurring");
+                const pCsv = document.getElementById("pref-csv");
+                const pPush = document.getElementById("pref-push");
+                
+                if (pBudget) pBudget.checked = prefs.budget_alerts_enabled;
+                if (pRecur) pRecur.checked = prefs.recurring_tx_enabled;
+                if (pCsv) pCsv.checked = prefs.csv_import_enabled;
+                if (pPush) pPush.checked = prefs.browser_push_enabled;
+            } catch (e) {
+                console.error("Error fetching preferences:", e);
+            }
+        }
+
+        async function updatePreference(prefName, value) {
+            try {
+                const body = {};
+                body[prefName] = value;
+                await fetch(`http://127.0.0.1:8000/preferences/${activeUserId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                console.log(`Updated preference ${prefName} to ${value}`);
+            } catch (e) {
+                console.error("Error updating preference:", e);
+            }
+        }
+
+        function toggleBrowserPush(enabled) {
+            updatePreference('browser_push_enabled', enabled);
+            if (enabled && Notification.permission !== "granted") {
+                Notification.requestPermission();
+            }
+        }
+
+        // Initialize Dashboard data
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchAccounts();
+            fetchSavingsGoals();
+            fetchNotifications();
+            fetchPreferences();
+
+            // Set up event listeners dynamically to avoid HTML inline linter errors
+            document.getElementById("pref-budget")?.addEventListener("change", (e) => {
+                updatePreference('budget_alerts_enabled', e.target.checked);
+            });
+            document.getElementById("pref-recurring")?.addEventListener("change", (e) => {
+                updatePreference('recurring_tx_enabled', e.target.checked);
+            });
+            document.getElementById("pref-csv")?.addEventListener("change", (e) => {
+                updatePreference('csv_import_enabled', e.target.checked);
+            });
+            document.getElementById("pref-push")?.addEventListener("change", (e) => {
+                toggleBrowserPush(e.target.checked);
+            });
+            document.getElementById("image-upload")?.addEventListener("change", (e) => {
+                handleImageUpload(e);
+            });
+            document.getElementById("mic-btn")?.addEventListener("click", () => {
+                startDictation();
+            });
+            document.getElementById("upload-btn")?.addEventListener("click", () => {
+                document.getElementById('image-upload')?.click();
+            });
+            document.getElementById("user-input")?.addEventListener("keypress", (e) => {
+                handleKeyPress(e);
+            });
+            document.getElementById("send-btn")?.addEventListener("click", () => {
+                sendMessage();
+            });
+        });
+
+        // Toast Notifications
+        function showToast(message) {
+            const container = document.getElementById("toast-container");
+            if (!container) return;
+            const toast = document.createElement("div");
+            toast.classList.add("toast");
+            toast.textContent = message;
+            toast.onclick = () => toast.remove();
+            
+            container.appendChild(toast);
+            
+            // Browser Push notification
+            const pPush = document.getElementById("pref-push");
+            const pushEnabled = pPush ? pPush.checked : false;
+            if (pushEnabled && Notification.permission === "granted") {
+                new Notification("Budget Alert!", {
+                    body: message,
+                    icon: "https://cdn-icons-png.flaticon.com/512/179/179386.png"
+                });
+            }
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 6000);
+        }
+
+        // -- CHAT LOOP & PREEXISTING CAPTURE SYSTEM --
+
+        function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                currentBase64Image = e.target.result; 
+                const preview = document.getElementById("image-preview-text");
+                if (preview) preview.style.display = "inline-block";
+                console.log("Image loaded in memory!");
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function sendMessage(audioBase64 = null) {
+            unlockAudio();
+            const inputField = document.getElementById("user-input");
+            if (!inputField) return;
+            const messageText = inputField.value.trim();
+            
+            if (!messageText && !audioBase64) return;
+
+            if (audioBase64) {
+                addMessage("🎤 [Voice Note]", "user");
+            } else {
+                addMessage(messageText, "user");
+                inputField.value = "";
+            }
+            scrollToBottom();
+
+            let isApprov = false;
+            if (!audioBase64) {
+                let textePropre = messageText.trim().toLowerCase();
+                let contientOui = /\b(yes|oui|ok|go|vas-y|send|approuvé|approved|accept)\b/.test(textePropre);
+                let contientNon = /\b(no|non)\b/.test(textePropre);
+                if (contientOui && !contientNon) {
+                    isApprov = true;
+                }
+            }
+
+            const chatMessages = document.getElementById("chat-messages");
+            const statusBadge = document.getElementById("status-badge");
+            const loadingDots = document.getElementById("loading-dots");
+            if (!chatMessages || !statusBadge || !loadingDots) return;
+            
+            const aiBubble = document.createElement("div");
+            aiBubble.classList.add("message", "bot");
+            
+            const aiContent = document.createElement("span");
+            aiContent.innerHTML = "<em>Thinking...</em>";
+            aiBubble.appendChild(aiContent);
+            
+            chatMessages.insertBefore(aiBubble, statusBadge);
+            scrollToBottom();
+
+            loadingDots.style.display = "block";
+
+            try {
+                const response = await fetch("http://127.0.0.1:8000/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        message: audioBase64 ? "" : messageText,
+                        session_id: maSessionUnique,
+                        is_approval: isApprov,
+                        image_data: currentBase64Image,
+                        audio_data: audioBase64,
+                        user_id: activeUserId
+                    })
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+                let rawMarkdown = "";
+                let sentenceBuffer = "";
+                
+                aiContent.innerHTML = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) {
+                        if (sentenceBuffer.trim().length > 0) {
+                            speakText(sentenceBuffer);
+                        }
+                        break;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    let parts = buffer.split("\n\n");
+                    buffer = parts.pop(); 
+
+                    for (let part of parts) {
+                        if (part.startsWith("data: ")) {
+                            try {
+                                let jsonStr = part.substring(6);
+                                let jsonData = JSON.parse(jsonStr);
+                                
+                                if (jsonData.type === "status") {
+                                    if (jsonData.content === "done") {
+                                        statusBadge.style.display = "none";
+                                    } else {
+                                        statusBadge.style.display = "block";
+                                        statusBadge.textContent = jsonData.content;
+                                        scrollToBottom();
                                     }
+                                } 
+                                else if (jsonData.type === "token") {
+                                    rawMarkdown += jsonData.content;
+                                    sentenceBuffer += jsonData.content;
+                                    if (typeof marked !== 'undefined') {
+                                        aiContent.innerHTML = marked.parse(rawMarkdown);
+                                    } else {
+                                        aiContent.innerHTML = rawMarkdown;
+                                    }
+                                    if (/[.?!:]/.test(jsonData.content) || jsonData.content.includes('\n')) {
+                                        if (sentenceBuffer.trim().length > 0) {
+                                            speakText(sentenceBuffer);
+                                            sentenceBuffer = "";
+                                        }
+                                    }
+                                } 
+                                else if (jsonData.type === "notification") {
+                                    showToast(jsonData.content);
                                 }
-                            } else if (jsonData.type === "error") {
-                                aiContent.innerHTML += `<br><span style='color:red;'>Server Error: ${jsonData.content}</span>`;
+                                else if (jsonData.type === "error") {
+                                    aiContent.innerHTML += `<br><span style='color:var(--danger);'>Server Error: ${jsonData.content}</span>`;
+                                }
+                                scrollToBottom();
+                            } catch (parseError) {
+                                console.error("JSON Error:", parseError, "on part:", part);
                             }
-                            scrollToBottom();
-                        } catch (parseError) {
-                            console.error("JSON Error:", parseError, "on part:", part);
                         }
                     }
                 }
+                currentBase64Image = null;
+                const previewText = document.getElementById("image-preview-text");
+                const fileUpload = document.getElementById("image-upload");
+                if (previewText) previewText.style.display = "none";
+                if (fileUpload) fileUpload.value = "";
+                
+                // Refresh dashboard data after chat responses complete
+                fetchAccounts();
+                fetchSavingsGoals();
+                fetchNotifications();
+                
+            } catch (error) {
+                console.error("Fetch Error:", error);
+                aiContent.innerHTML = "Server connection error.";
+            } finally {
+                loadingDots.style.display = "none";
             }
-            currentBase64Image = null;
-            document.getElementById("image-preview-text").style.display = "none";
-            document.getElementById("image-upload").value = "";
-        } catch (error) {
-            console.error("Erreur Fetch:", error);
-            aiContent.innerHTML = "Erreur de connexion au serveur.";
         }
-    }
 
-    function addMessage(text, sender) {
-        const messageDiv = document.createElement("div");
-        messageDiv.classList.add("message", sender);
-        messageDiv.textContent = text;
-        
-        const chatMessages = document.getElementById("chat-messages");
-        const loadingDiv = document.getElementById("loading");
-        
-        chatMessages.insertBefore(messageDiv, loadingDiv);
-        scrollToBottom();
-    }
+        function addMessage(text, sender) {
+            const messageDiv = document.createElement("div");
+            messageDiv.classList.add("message", sender);
+            messageDiv.textContent = text;
+            
+            const chatMessages = document.getElementById("chat-messages");
+            const statusBadge = document.getElementById("status-badge");
+            if (!chatMessages || !statusBadge) return;
+            
+            chatMessages.insertBefore(messageDiv, statusBadge);
+            scrollToBottom();
+        }
 
-    function scrollToBottom() {
-        const chatMessages = document.getElementById("chat-messages");
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+        function scrollToBottom() {
+            const chatMessages = document.getElementById("chat-messages");
+            if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
 
-    function handleKeyPress(event) {
-        if (event.key === "Enter") { sendMessage(); }
-    }
+        function handleKeyPress(event) {
+            if (event.key === "Enter") { sendMessage(); }
+        }
 
+        async function startDictation() {
+            unlockAudio();
+            const micBtn = document.getElementById('mic-btn');
+            if (!micBtn) return;
+            if (!isRecording) {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
 
-    let mediaRecorder = null;
-    let audioChunks = [];
-    let isRecording = false;
-    const micBtn = document.getElementById('mic-btn');
+                    mediaRecorder.ondataavailable = function(event) {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
 
-    async function startDictation() {
-        unlockAudio();
-        if (!isRecording) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
+                    mediaRecorder.onstop = async function() {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        
+                        const reader = new FileReader();
+                        reader.onloadend = function() {
+                            const base64Data = reader.result.split(',')[1];
+                            console.log("Audio captured in base64!");
+                            sendMessage(base64Data);
+                        };
+                        reader.readAsDataURL(audioBlob);
+                        
+                        stream.getTracks().forEach(track => track.stop());
+                    };
 
-                mediaRecorder.ondataavailable = function(event) {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
+                    mediaRecorder.start();
+                    isRecording = true;
+                    micBtn.textContent = "⏹️"; 
+                    micBtn.classList.add("mic-active");
+                    const inputField = document.getElementById("user-input");
+                    if (inputField) inputField.placeholder = "Recording in progress...";
+                } catch (err) {
+                    console.error("Microphone access denied or error:", err);
+                    alert("Impossible to access mic: " + err.message);
+                }
+            } else {
+                mediaRecorder.stop();
+                isRecording = false;
+                micBtn.textContent = "🎤";
+                micBtn.classList.remove("mic-active");
+                const inputField = document.getElementById("user-input");
+                if (inputField) inputField.placeholder = "Write your message or speak...";
+            }
+        }
+
+        window.utterances = [];
+
+        function speakText(text) {
+            if ('speechSynthesis' in window) {
+                const cleanText = text.replace(/[*#_`~]/g, '');
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = 'en-US';
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                window.utterances.push(utterance); 
+                
+                utterance.onend = function() {
+                    const index = window.utterances.indexOf(utterance);
+                    if (index > -1) {
+                        window.utterances.splice(index, 1);
                     }
                 };
 
-                mediaRecorder.onstop = async function() {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    
-                    const reader = new FileReader();
-                    reader.onloadend = function() {
-                        const base64Data = reader.result.split(',')[1];
-                        console.log("Audio captée en base64 !");
-                        sendMessage(base64Data);
-                    };
-                    reader.readAsDataURL(audioBlob);
-                    
-                    stream.getTracks().forEach(track => track.stop());
-                };
-
-                mediaRecorder.start();
-                isRecording = true;
-                micBtn.textContent = "⏹️"; 
-                micBtn.style.background = "#dc3545"; 
-                document.getElementById("user-input").placeholder = "Recording voice note...";
-            } catch (err) {
-                console.error("Microphone access denied or error:", err);
-                alert("Impossible d'accéder au micro : " + err.message);
+                window.speechSynthesis.speak(utterance);
+            } else {
+                console.warn("Text-to-speech is not supported by this browser.");
             }
-        } else {
-            mediaRecorder.stop();
-            isRecording = false;
-            micBtn.textContent = "🎤";
-            micBtn.style.background = "#28a745";
-            document.getElementById("user-input").placeholder = "Write your message or speak...";
         }
-    }
+        
+        function unlockAudio() {
+            if (!audioUnlocked && 'speechSynthesis' in window) {
+                window.speechSynthesis.cancel(); 
 
-    window.utterances = [];
-
-    function speakText(text) {
-        if ('speechSynthesis' in window) {
-            const cleanText = text.replace(/[*#_`~]/g, '');
-            const utterance = new SpeechSynthesisUtterance(cleanText);
-            utterance.lang = 'en-US';
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-            window.utterances.push(utterance); 
-            
-            utterance.onend = function() {
-                const index = window.utterances.indexOf(utterance);
-                if (index > -1) {
-                    window.utterances.splice(index, 1);
-                }
-            };
-
-            window.speechSynthesis.speak(utterance);
-        } else {
-            console.warn("La synthèse vocale n'est pas supportée par ce navigateur.");
+                const silentUtterance = new SpeechSynthesisUtterance(' '); 
+                silentUtterance.volume = 0;
+                
+                window.speechSynthesis.speak(silentUtterance);
+                audioUnlocked = true;
+                console.log("Audio speech engine purged and unlocked!");
+            }
         }
-    }
+    </script>
+</head>
+<body>
 
+<div class="toast-container" id="toast-container"></div>
 
-    let audioUnlocked = false;
+<div class="dashboard-container">
     
-    function unlockAudio() {
-        if (!audioUnlocked && 'speechSynthesis' in window) {
-            window.speechSynthesis.cancel(); 
+    <!-- LEFT PANEL: DASHBOARD WIDGETS -->
+    <div class="left-panel">
+        <div class="panel-header">
+            <h1>Budget Agent</h1>
+            <span class="workspace-badge" id="ws-badge">Coloc Taha & Mohamed</span>
+        </div>
 
-            const silentUtterance = new SpeechSynthesisUtterance(' '); 
-            silentUtterance.volume = 0;
+        <!-- ACCOUNTS BALANCE WIDGET -->
+        <div class="widget-section">
+            <div class="section-title">
+                <span>💳 Accounts & Balances</span>
+            </div>
+            <div class="accounts-grid" id="accounts-grid">
+                <div style="color: var(--text-muted); font-size: 0.9em;">Loading accounts...</div>
+            </div>
+        </div>
+
+        <!-- SAVINGS GOALS WIDGET -->
+        <div class="widget-section">
+            <div class="section-title">
+                <span>🎯 Savings Goals</span>
+            </div>
+            <div class="goals-grid" id="goals-grid">
+                <div style="color: var(--text-muted); font-size: 0.9em;">Loading savings goals...</div>
+            </div>
+        </div>
+
+        <!-- NOTIFICATION PREFERENCES -->
+        <div class="widget-section">
+            <div class="section-title">
+                <span>⚙️ Notification Preferences</span>
+            </div>
+            <div class="pref-card">
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <span class="pref-label">Budget Alerts</span>
+                        <span class="pref-desc">Warn when monthly budget caps are breached</span>
+                    </div>
+                    <label class="switch" for="pref-budget">
+                        <input type="checkbox" id="pref-budget" />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <span class="pref-label">Recurring Subscriptions</span>
+                        <span class="pref-desc">Notify on automated subscription charges</span>
+                    </div>
+                    <label class="switch" for="pref-recurring">
+                        <input type="checkbox" id="pref-recurring" />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <span class="pref-label">CSV Statement Imports</span>
+                        <span class="pref-desc">Log reports when bank CSV statements are uploaded</span>
+                    </div>
+                    <label class="switch" for="pref-csv">
+                        <input type="checkbox" id="pref-csv" />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <span class="pref-label">Desktop Push Notifications</span>
+                        <span class="pref-desc">Enable system-level browser desktop push notifications</span>
+                    </div>
+                    <label class="switch" for="pref-push">
+                        <input type="checkbox" id="pref-push" />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- RECENT ALERTS WIDGET -->
+        <div class="widget-section">
+            <div class="section-title">
+                <span>🔔 Recent Alerts</span>
+            </div>
+            <div class="alerts-list" id="alerts-list">
+                <div style="color: var(--text-muted); font-size: 0.9em;">No recent alerts.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT PANEL: CONVERSATIONAL AGENT -->
+    <div class="right-panel">
+        <div class="chat-header">
+            <span>AI Assistant</span>
+            <div class="agent-status">
+                <span class="status-dot"></span>
+                <span>Agent Online</span>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <div class="message bot">Hello! I am your intelligent financial advisor. How can I help you today?</div>
+            <div class="status-badge" id="status-badge">⚙️ Agent is thinking...</div>
+            <div class="loading-dots" id="loading-dots">Agent thinking...</div>
+        </div>
+
+        <div class="chat-input-area">
+            <!-- Mic button -->
+            <button class="input-btn" id="mic-btn" title="Record a voice note">🎤</button>
             
-            window.speechSynthesis.speak(silentUtterance);
-            audioUnlocked = true;
-            console.log(" Moteur audio purgé et déverrouillé !");
-        }
-    }
-</script>
+            <!-- Attachment button -->
+            <input type="file" id="image-upload" accept="image/*" style="display: none;" />
+            <button class="input-btn" id="upload-btn" title="Attach a receipt photo">📎</button>
+            <span id="image-preview-text" style="display:none; align-self:center; margin-right:10px; color:var(--success); font-weight:bold; font-size: 0.85em;">🖼️ Receipt ready</span>
+
+            <!-- Text input -->
+            <div class="input-wrapper">
+                <input type="text" id="user-input" placeholder="Write your message or speak..." />
+            </div>
+            
+            <!-- Send button -->
+            <button class="input-btn primary" id="send-btn">Send</button>
+        </div>
+    </div>
+
+</div>
 
 </body>
 </html>

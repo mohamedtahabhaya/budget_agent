@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-llm = ChatGroq(model="llama-3.3-70b-versatile", streaming=True)
+llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", streaming=True)
 
 class SupervisorResponse(BaseModel):
     """Decide which agent should act next based on the user's financial request."""

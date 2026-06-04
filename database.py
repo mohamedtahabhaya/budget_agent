@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine, Column, String, Float, Integer, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
-DATABASE_URL = "sqlite:///budget.db"
+import os
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///budget.db")
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -117,6 +118,26 @@ class NotificationModel(Base):
     timestamp = Column(String)
     is_read = Column(Boolean, default=False)
 
+class InvitationModel(Base):
+    __tablename__ = "invitations"
+    id = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id"))
+    email = Column(String)
+    name = Column(String)
+    token = Column(String, unique=True, index=True)
+    role = Column(String)
+    income_mad = Column(Float, default=0.0)
+    is_accepted = Column(Boolean, default=False)
+
+class NotificationPreferenceModel(Base):
+    __tablename__ = "notification_preferences"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), unique=True)
+    budget_alerts_enabled = Column(Boolean, default=True)
+    recurring_tx_enabled = Column(Boolean, default=True)
+    csv_import_enabled = Column(Boolean, default=True)
+    browser_push_enabled = Column(Boolean, default=True)
+
 Base.metadata.create_all(bind=engine)
 
 def seed_database():
@@ -128,6 +149,10 @@ def seed_database():
             u1 = UserModel(id="user_mohamed", workspace_id=ws_id, name="Mohamed", role="owner", income_mad=15000.0)
             u2 = UserModel(id="user_taha", workspace_id=ws_id, name="Taha", role="member", income_mad=10000.0)
             db.add_all([u1, u2])
+            
+            p1 = NotificationPreferenceModel(user_id="user_mohamed")
+            p2 = NotificationPreferenceModel(user_id="user_taha")
+            db.add_all([p1, p2])
             
             import json
             coloc_split = SplitRuleModel(
