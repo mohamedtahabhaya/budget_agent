@@ -34,6 +34,7 @@ class AccountModel(Base):
     owner_user_id = Column(String, nullable=True)
     currency = Column(String, default="MAD")
     balance = Column(Float, default=0.0)
+    is_archived = Column(Boolean, default=False)
 
     transactions = relationship("TransactionModel", back_populates="account")
 

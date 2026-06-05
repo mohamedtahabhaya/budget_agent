@@ -4,8 +4,17 @@ A sophisticated multi-agent financial assistant built with **FastAPI**, **LangGr
 
 ## 🚀 Core Features (v0.3)
 
+- **Interactive Settings Control Panel (New)**:
+    - **Workspace Configuration Form**: Update the workspace name, base currency, and active split rules directly from the Settings tab.
+    - **Dynamic Member Splits UI**: Shows a grid of workspace members and lets the user input percentage shares for custom splits, validating that they total exactly 100%.
+    - **Account Lifecycle Management**: Create new accounts (Personal, Shared Current, Shared Savings/Fund, Business, etc.) with custom currencies and initial balances.
+    - **Rename & Archive Accounts**: Easily change account names or archive them from the UI list. Archived accounts are hidden from dashboard cards but their history is preserved in the database.
+    - **Category Budget Limits Form**: Directly view and edit monthly budget caps for all categories (e.g. Groceries, Leisure, Utilities) in the database.
+
 - **Premium Dark Mode Dashboard UI**:
     - High-end dark theme dashboard with linear gradients, glassmorphism, and Outfit/Inter modern typography.
+    - **Tab switching navigation**: Toggle seamlessly between the interactive financial chat dashboard and workspace configuration settings panels.
+    - **Recent Transactions History**: A live ledger at the bottom of the dashboard showing the last 10 transactions, styled with visual indicators for shared expenses and color-coded amount signs (red for expenses, green for income).
     - **Balances Widget**: Live accounts cards grid highlighting personal, savings, and shared balances.
     - **Savings Progress Goals**: Dynamic savings goals tracking with percentage progress indicators.
     - **Live Alerts Feed**: Recent critical budget warning notifications displayed inside the dashboard.
@@ -24,8 +33,8 @@ A sophisticated multi-agent financial assistant built with **FastAPI**, **LangGr
 
 - **Multi-Agent Orchestration (LangGraph)**:
     - **Supervisor**: Routes queries dynamically using high-performance text-based heuristics, resolving structured output API bottlenecks.
-    - **Data Entry Expert**: Manages database writes (transactions, double-entry transfers, savings goals, recurring transactions, bank statements).
-    - **Financial Analyst**: Reads and synthesizes data (multi-scope budgets, balances, custom split reconciliations, recurring schedules, notifications/alerts).
+    - **Data Entry Expert**: Manages database writes (transactions, double-entry transfers, savings goals, recurring transactions, bank statements, accounts creation/rename/archive, split rules updates).
+    - **Financial Analyst**: Reads and synthesizes data (multi-scope budgets, balances, custom split rules, account configuration details, reports, recurring schedules, notifications/alerts).
     - **Concierge**: Handles onboarding, greetings, and small talk.
 
 - **Workspace Onboarding & Invitation Flow**:
@@ -78,6 +87,8 @@ A sophisticated multi-agent financial assistant built with **FastAPI**, **LangGr
    Create a `.env` file in the root directory:
    ```env
    GROQ_API_KEY=your_groq_api_key_here
+   # Optional CORS configuration for production (defaults to * if omitted)
+   CORS_ALLOWED_ORIGINS=http://127.0.0.1:8000,http://localhost:8000
    ```
 
 4. **Initialize Database**:

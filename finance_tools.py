@@ -16,19 +16,30 @@ from sqlalchemy import func, desc
 
 class ListAccountsSchema(BaseModel):
     workspace_id: str = Field(..., description="The ID of the current workspace to list accounts for.")
+    show_archived: Optional[Union[bool, str]] = Field(default=False, description="Whether to include archived accounts.")
 
 @tool(args_schema=ListAccountsSchema)
-def list_accounts(workspace_id: str) -> str:
+def list_accounts(workspace_id: str, show_archived: Optional[Union[bool, str]] = False) -> str:
     """List all accounts and balances for a workspace."""
+    def parse_bool(val):
+        if val is None: return False
+        if isinstance(val, bool): return val
+        return val.lower().strip() in ["true", "1", "yes", "on"]
+    
+    show_archived_bool = parse_bool(show_archived)
     db = SessionLocal()
     try:
-        accounts = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id).all()
+        query = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id)
+        if not show_archived_bool:
+            query = query.filter(AccountModel.is_archived == False)
+        accounts = query.all()
         if not accounts:
             return "No accounts found for this workspace."
         
         output = "Accounts found:\n"
         for acc in accounts:
-            output += f"- {acc.name} (Slug: {acc.slug}, Balance: {acc.balance} {acc.currency}, Type: {acc.type})\n"
+            status = " [Archived]" if acc.is_archived else ""
+            output += f"- {acc.name} (Slug: {acc.slug}, Balance: {acc.balance} {acc.currency}, Type: {acc.type}){status}\n"
         return output
     finally:
         db.close()
@@ -1338,7 +1349,288 @@ def update_savings_goal_properties(
     finally:
         db.close()
 
-data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, delete_savings_goal, update_savings_goal_properties, categorize, transcribe_audio, parse_receipt_image, create_recurring_transaction, import_bank_csv, process_recurring_transactions, delete_recurring_transaction, create_workspace_invite, update_notification_preferences]
-analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget, list_recurring_transactions, list_notifications, list_invitations, get_notification_preferences]
+class CreateAccountSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    name: str = Field(..., description="The user-friendly name of the account (e.g. 'Sarah Personal').")
+    type: str = Field(..., description="The type of account: personal, shared_current, shared_savings, business, or custom.")
+    owner_user_id: Optional[str] = Field(default=None, description="The user ID of the owner if type is 'personal'. Null for shared accounts.")
+    currency: Optional[str] = Field(default="MAD", description="The currency of the account (default MAD).")
+    balance: Optional[Union[float, str]] = Field(default=0.0, description="The initial balance of the account.")
+
+@tool(args_schema=CreateAccountSchema)
+def create_account(
+    workspace_id: str,
+    name: str,
+    type: str,
+    owner_user_id: Optional[str] = None,
+    currency: str = "MAD",
+    balance: Optional[Union[float, str]] = 0.0
+) -> str:
+    """Create a new financial account in the workspace with a unique slug."""
+    db = SessionLocal()
+    try:
+        if balance is not None:
+            if isinstance(balance, str):
+                balance = float(balance.replace(",", ".").replace(" ", "").strip())
+        else:
+            balance = 0.0
+
+        import re
+        base_slug = re.sub(r'[^a-z0-9_]', '', name.lower().replace(' ', '_'))
+        if not base_slug:
+            base_slug = "account"
+        
+        slug = base_slug
+        counter = 1
+        while db.query(AccountModel).filter(AccountModel.slug == slug).first():
+            slug = f"{base_slug}_{counter}"
+            counter += 1
+
+        new_acc = AccountModel(
+            workspace_id=workspace_id,
+            name=name,
+            slug=slug,
+            type=type,
+            owner_user_id=owner_user_id if type == "personal" else None,
+            currency=currency.upper() if currency else "MAD",
+            balance=balance,
+            is_archived=False
+        )
+        db.add(new_acc)
+        db.commit()
+        return f"Success: Created account '{name}' with type '{type}', currency '{new_acc.currency}', initial balance {balance} {new_acc.currency}, and slug '{slug}'."
+    except Exception as e:
+        db.rollback()
+        return f"Error creating account: {str(e)}"
+    finally:
+        db.close()
+
+class RenameAccountSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    slug: str = Field(..., description="The current slug of the account to rename.")
+    new_name: str = Field(..., description="The new user-friendly name for the account.")
+
+@tool(args_schema=RenameAccountSchema)
+def rename_account(workspace_id: str, slug: str, new_name: str) -> str:
+    """Rename an existing account and update its slug accordingly (preserving references)."""
+    db = SessionLocal()
+    try:
+        acc = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.slug == slug).first()
+        if not acc:
+            return f"Error: Account with slug '{slug}' not found in workspace '{workspace_id}'."
+
+        old_name = acc.name
+        acc.name = new_name
+
+        import re
+        base_slug = re.sub(r'[^a-z0-9_]', '', new_name.lower().replace(' ', '_'))
+        if not base_slug:
+            base_slug = "account"
+            
+        new_slug = base_slug
+        counter = 1
+        while db.query(AccountModel).filter(AccountModel.slug == new_slug).first():
+            existing = db.query(AccountModel).filter(AccountModel.slug == new_slug).first()
+            if existing.id == acc.id:
+                break
+            new_slug = f"{base_slug}_{counter}"
+            counter += 1
+
+        old_slug = acc.slug
+        acc.slug = new_slug
+        db.commit()
+        return f"Success: Account '{old_name}' (slug: '{old_slug}') has been renamed to '{new_name}' (new slug: '{new_slug}')."
+    except Exception as e:
+        db.rollback()
+        return f"Error renaming account: {str(e)}"
+    finally:
+        db.close()
+
+class ArchiveAccountSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    slug: str = Field(..., description="The slug of the account to archive.")
+
+@tool(args_schema=ArchiveAccountSchema)
+def archive_account(workspace_id: str, slug: str) -> str:
+    """Archive an account so that it is hidden from listings but its historical transactions remain preserved."""
+    db = SessionLocal()
+    try:
+        acc = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.slug == slug).first()
+        if not acc:
+            return f"Error: Account with slug '{slug}' not found in workspace '{workspace_id}'."
+
+        acc.is_archived = True
+        db.commit()
+        return f"Success: Account '{acc.name}' (slug: '{slug}') has been archived successfully."
+    except Exception as e:
+        db.rollback()
+        return f"Error archiving account: {str(e)}"
+    finally:
+        db.close()
+
+class UpdateWorkspaceSettingsSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    name: Optional[str] = Field(default=None, description="New workspace name.")
+    currency: Optional[str] = Field(default=None, description="New default currency for the workspace (e.g. 'MAD', 'EUR').")
+
+@tool(args_schema=UpdateWorkspaceSettingsSchema)
+def update_workspace_settings(workspace_id: str, name: Optional[str] = None, currency: Optional[str] = None) -> str:
+    """Update general settings of the active workspace, such as its name or default currency."""
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return f"Error: Workspace '{workspace_id}' not found."
+
+        changes = []
+        if name:
+            old_name = ws.name
+            ws.name = name
+            changes.append(f"Workspace Name: '{old_name}' -> '{name}'")
+        if currency:
+            old_curr = ws.currency
+            ws.currency = currency.upper().strip()
+            changes.append(f"Workspace Currency: '{old_curr}' -> '{ws.currency}'")
+
+        if not changes:
+            return "No workspace updates were provided."
+
+        db.commit()
+        return f"Success: Updated workspace settings for '{workspace_id}':\n" + "\n".join([f"- {c}" for c in changes])
+    except Exception as e:
+        db.rollback()
+        return f"Error updating workspace settings: {str(e)}"
+    finally:
+        db.close()
+
+class UpdateSplitRulesSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+    split_rule: str = Field(..., description="The split rule type: equal, proportional, or custom.")
+    custom_percentages: Optional[dict] = Field(default=None, description="A dictionary map of user_id to percentage values (e.g. {'user_mohamed': 60, 'user_taha': 40}) if split_rule is 'custom'.")
+
+@tool(args_schema=UpdateSplitRulesSchema)
+def update_split_rules(workspace_id: str, split_rule: str, custom_percentages: Optional[dict] = None) -> str:
+    """Update split rule mode (equal, proportional, or custom) and custom percentages mapping in the database."""
+    import json
+    split_rule = split_rule.lower().strip()
+    if split_rule not in ["equal", "proportional", "custom"]:
+        return "Error: split_rule must be one of: equal, proportional, custom."
+
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return f"Error: Workspace '{workspace_id}' not found."
+
+        ws.split_rule = split_rule
+        message = f"Split rule type updated to '{split_rule}'."
+
+        if split_rule == "custom":
+            if not custom_percentages:
+                return "Error: custom_percentages dictionary (user_id -> percentage) is required when split_rule is 'custom'."
+            
+            total = 0
+            for uid, val in custom_percentages.items():
+                try:
+                    total += float(val)
+                except ValueError:
+                    return f"Error: Percentage value for user '{uid}' must be a number."
+            
+            if not (99.9 <= total <= 100.1):
+                return f"Error: Custom percentages must sum to 100%. Got {total}%."
+
+            rule = db.query(SplitRuleModel).filter(SplitRuleModel.workspace_id == workspace_id).first()
+            if not rule:
+                rule = SplitRuleModel(workspace_id=workspace_id)
+                db.add(rule)
+            
+            pct_map = {uid: float(val) for uid, val in custom_percentages.items()}
+            rule.member_percentages = json.dumps(pct_map)
+            message += f" Custom percentages set: {pct_map}."
+
+        db.commit()
+        return f"Success for workspace '{workspace_id}': {message}"
+    except Exception as e:
+        db.rollback()
+        return f"Error updating split rules: {str(e)}"
+    finally:
+        db.close()
+
+class GetWorkspaceSettingsSchema(BaseModel):
+    workspace_id: str = Field(..., description="The ID of the workspace.")
+
+@tool(args_schema=GetWorkspaceSettingsSchema)
+def get_workspace_settings(workspace_id: str) -> str:
+    """Retrieve settings for the workspace including name, default currency, and split rule."""
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return f"Error: Workspace '{workspace_id}' not found."
+            
+        rule = db.query(SplitRuleModel).filter(SplitRuleModel.workspace_id == workspace_id).first()
+        custom_pct = rule.member_percentages if rule else {}
+        
+        return f"Workspace Settings:\n- ID: {ws.id}\n- Name: {ws.name}\n- Default Currency: {ws.currency}\n- Split Rule: {ws.split_rule}\n- Custom Percentages: {custom_pct}"
+    finally:
+        db.close()
+
+class UpdateBudgetLimitSchema(BaseModel):
+    category_id: str = Field(..., description="The ID of the category (e.g. 'cat_groceries').")
+    monthly_cap: Union[float, str] = Field(..., description="The monthly budget cap (in MAD). Set to 0 to remove/disable the limit.")
+    scope_type: Optional[str] = Field(default="workspace", description="Scope type: 'workspace', 'user', or 'account'.")
+
+@tool(args_schema=UpdateBudgetLimitSchema)
+def update_budget_limit(category_id: str, monthly_cap: Union[float, str], scope_type: str = "workspace") -> str:
+    """Create or update a budget limit rule for a category in the database."""
+    category_id = category_id.lower().strip()
+    scope_type = scope_type.lower().strip()
+    if scope_type not in ["workspace", "user", "account"]:
+        return "Error: scope_type must be one of: workspace, user, account."
+        
+    try:
+        monthly_cap_float = float(str(monthly_cap).replace(",", ".").strip())
+    except ValueError:
+        return f"Error: monthly_cap must be a valid number, got '{monthly_cap}'."
+
+    db = SessionLocal()
+    try:
+        cat = db.query(CategoryModel).filter(CategoryModel.id == category_id).first()
+        if not cat:
+            return f"Error: Category '{category_id}' does not exist in the database."
+            
+        rule = db.query(BudgetRuleModel).filter(BudgetRuleModel.category_id == category_id).first()
+        if not rule:
+            if monthly_cap_float > 0:
+                rule = BudgetRuleModel(
+                    category_id=category_id,
+                    scope_type=scope_type,
+                    scope_id=None,
+                    monthly_cap=monthly_cap_float,
+                    alert_threshold_pct=80.0
+                )
+                db.add(rule)
+                db.commit()
+                return f"Success: Created new budget limit of {monthly_cap_float} MAD for category '{category_id}'."
+            else:
+                return f"Note: No budget limit existed for category '{category_id}' and monthly_cap is 0."
+        else:
+            if monthly_cap_float <= 0:
+                db.delete(rule)
+                db.commit()
+                return f"Success: Removed/disabled budget limit for category '{category_id}'."
+            else:
+                rule.monthly_cap = monthly_cap_float
+                rule.scope_type = scope_type
+                db.commit()
+                return f"Success: Updated budget limit for category '{category_id}' to {monthly_cap_float} MAD."
+    except Exception as e:
+        db.rollback()
+        return f"Error updating budget limit: {str(e)}"
+    finally:
+        db.close()
+
+data_tools = [create_transaction, delete_transaction, transfer, create_savings_goal, update_savings_goal, delete_savings_goal, update_savings_goal_properties, categorize, transcribe_audio, parse_receipt_image, create_recurring_transaction, import_bank_csv, process_recurring_transactions, delete_recurring_transaction, create_workspace_invite, update_notification_preferences, create_account, rename_account, archive_account, update_workspace_settings, update_split_rules, update_budget_limit]
+analyst_tools = [get_balances, list_recent_transactions, list_savings_goals, compute_split, list_members, generate_report, check_budget, list_recurring_transactions, list_notifications, list_invitations, get_notification_preferences, get_workspace_settings]
 
 budget_tools = data_tools + analyst_tools

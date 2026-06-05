@@ -340,12 +340,136 @@ async def update_user_preferences(user_id: str, request: UpdatePreferencesReques
     finally:
         db.close()
 
+class CreateAccountRequest(BaseModel):
+    workspace_id: str = "workspace_coloc_taha_mohamed"
+    name: str
+    type: str
+    owner_user_id: Optional[str] = None
+    currency: str = "MAD"
+    balance: float = 0.0
+
+class RenameAccountRequest(BaseModel):
+    workspace_id: str = "workspace_coloc_taha_mohamed"
+    new_name: str
+
+class UpdateWorkspaceRequest(BaseModel):
+    name: Optional[str] = None
+    currency: Optional[str] = None
+    split_rule: Optional[str] = None
+    custom_percentages: Optional[dict] = None
+
+@app.get("/workspace/{workspace_id}")
+async def get_workspace_details(workspace_id: str):
+    from database import SessionLocal, WorkspaceModel, SplitRuleModel, UserModel
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return {"error": f"Workspace '{workspace_id}' not found."}
+            
+        rule = db.query(SplitRuleModel).filter(SplitRuleModel.workspace_id == workspace_id).first()
+        custom_pct = rule.member_percentages if rule else {}
+        
+        members = db.query(UserModel).filter(UserModel.workspace_id == workspace_id).all()
+        members_list = [{"id": u.id, "name": u.name, "role": u.role, "income_mad": u.income_mad} for u in members]
+        
+        return {
+            "workspace_id": workspace_id,
+            "name": ws.name,
+            "currency": ws.currency,
+            "split_rule": ws.split_rule,
+            "custom_percentages": custom_pct,
+            "members": members_list
+        }
+    finally:
+        db.close()
+
+@app.post("/workspace/{workspace_id}")
+async def update_workspace_details(workspace_id: str, request: UpdateWorkspaceRequest):
+    from database import SessionLocal, WorkspaceModel, SplitRuleModel
+    db = SessionLocal()
+    try:
+        ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
+        if not ws:
+            return {"error": f"Workspace '{workspace_id}' not found."}
+            
+        if request.name is not None:
+            ws.name = request.name
+        if request.currency is not None:
+            ws.currency = request.currency.upper().strip()
+        if request.split_rule is not None:
+            rule_type = request.split_rule.lower().strip()
+            if rule_type in ["equal", "proportional", "custom"]:
+                ws.split_rule = rule_type
+                
+        if request.split_rule == "custom" and request.custom_percentages is not None:
+            rule = db.query(SplitRuleModel).filter(SplitRuleModel.workspace_id == workspace_id).first()
+            if not rule:
+                rule = SplitRuleModel(workspace_id=workspace_id)
+                db.add(rule)
+            rule.member_percentages = json.dumps({uid: float(val) for uid, val in request.custom_percentages.items()})
+            
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+@app.post("/accounts/create")
+async def create_account_api(request: CreateAccountRequest):
+    from finance_tools import create_account
+    try:
+        res = create_account.invoke({
+            "workspace_id": request.workspace_id,
+            "name": request.name,
+            "type": request.type,
+            "owner_user_id": request.owner_user_id,
+            "currency": request.currency,
+            "balance": request.balance
+        })
+        if "Success:" in res:
+            return {"success": True, "message": res}
+        return {"error": res}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/accounts/{slug}/archive")
+async def archive_account_api(slug: str, workspace_id: str = "workspace_coloc_taha_mohamed"):
+    from finance_tools import archive_account
+    try:
+        res = archive_account.invoke({
+            "workspace_id": workspace_id,
+            "slug": slug
+        })
+        if "Success:" in res:
+            return {"success": True, "message": res}
+        return {"error": res}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/accounts/{slug}/rename")
+async def rename_account_api(slug: str, request: RenameAccountRequest):
+    from finance_tools import rename_account
+    try:
+        res = rename_account.invoke({
+            "workspace_id": request.workspace_id,
+            "slug": slug,
+            "new_name": request.new_name
+        })
+        if "Success:" in res:
+            return {"success": True, "message": res}
+        return {"error": res}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/accounts")
 async def get_accounts(workspace_id: str = "workspace_coloc_taha_mohamed"):
     from database import SessionLocal, AccountModel
     db = SessionLocal()
     try:
-        accounts = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id).all()
+        accounts = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.is_archived == False).all()
         return [{"name": acc.name, "slug": acc.slug, "balance": acc.balance, "currency": acc.currency, "type": acc.type} for acc in accounts]
     finally:
         db.close()
@@ -371,9 +495,110 @@ async def get_notifications_list(workspace_id: str = "workspace_coloc_taha_moham
         db.close()
 
 
+class UpdateBudgetRequest(BaseModel):
+    category_id: str
+    monthly_cap: float
+    scope_type: str = "workspace"
+    alert_threshold_pct: float = 80.0
+    workspace_id: str = "workspace_coloc_taha_mohamed"
+
+@app.get("/budgets")
+async def get_budgets(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    from database import SessionLocal, CategoryModel, BudgetRuleModel
+    db = SessionLocal()
+    try:
+        categories = db.query(CategoryModel).filter(CategoryModel.workspace_id == workspace_id).all()
+        rules = db.query(BudgetRuleModel).all()
+        rule_map = {r.category_id: r for r in rules}
+        
+        result = []
+        for cat in categories:
+            rule = rule_map.get(cat.id)
+            result.append({
+                "category_id": cat.id,
+                "category_name": cat.name,
+                "icon": cat.icon,
+                "kind": cat.kind,
+                "monthly_cap": rule.monthly_cap if rule else 0.0,
+                "scope_type": rule.scope_type if rule else "workspace",
+                "alert_threshold_pct": rule.alert_threshold_pct if rule else 80.0
+            })
+        return result
+    finally:
+        db.close()
+
+@app.post("/budgets")
+async def update_budget(request: UpdateBudgetRequest):
+    from database import SessionLocal, BudgetRuleModel
+    db = SessionLocal()
+    try:
+        rule = db.query(BudgetRuleModel).filter(BudgetRuleModel.category_id == request.category_id).first()
+        if not rule:
+            if request.monthly_cap > 0:
+                rule = BudgetRuleModel(
+                    category_id=request.category_id,
+                    scope_type=request.scope_type,
+                    scope_id=None,
+                    monthly_cap=request.monthly_cap,
+                    alert_threshold_pct=request.alert_threshold_pct
+                )
+                db.add(rule)
+        else:
+            if request.monthly_cap <= 0:
+                db.delete(rule)
+            else:
+                rule.monthly_cap = request.monthly_cap
+                rule.scope_type = request.scope_type
+                rule.alert_threshold_pct = request.alert_threshold_pct
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
+@app.get("/transactions")
+async def get_transactions(workspace_id: str = "workspace_coloc_taha_mohamed", limit: int = 10):
+    from database import SessionLocal, TransactionModel, AccountModel, CategoryModel, UserModel
+    db = SessionLocal()
+    try:
+        txs = db.query(TransactionModel)\
+                .join(AccountModel, TransactionModel.account_id == AccountModel.id)\
+                .filter(AccountModel.workspace_id == workspace_id)\
+                .order_by(TransactionModel.date.desc(), TransactionModel.id.desc())\
+                .limit(limit).all()
+                
+        result = []
+        for t in txs:
+            cat = db.query(CategoryModel).filter(CategoryModel.id == t.category_id).first()
+            acc = db.query(AccountModel).filter(AccountModel.id == t.account_id).first()
+            usr = db.query(UserModel).filter(UserModel.id == t.user_id).first()
+            
+            result.append({
+                "id": t.id,
+                "amount": t.amount,
+                "date": t.date,
+                "merchant": t.merchant,
+                "category_name": cat.name if cat else t.category_id,
+                "category_icon": cat.icon if cat else "📝",
+                "account_name": acc.name if acc else "Unknown",
+                "paid_by_name": usr.name if usr else t.user_id,
+                "is_shared": t.is_shared
+            })
+        return result
+    finally:
+        db.close()
+
+
+import os
+origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
+origins = [o.strip() for o in origins if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
+    allow_credentials=True if "*" not in origins else False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

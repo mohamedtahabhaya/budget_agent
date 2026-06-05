@@ -324,6 +324,202 @@
         .alert-msg { color: #f3f4f6; }
         .alert-time { font-size: 0.8em; color: var(--text-muted); }
 
+        /* Panel Navigation Tabs */
+        .panel-nav {
+            display: flex;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 5px;
+        }
+
+        .nav-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: var(--text-muted);
+            transition: all 0.2s;
+            border: none;
+            background: transparent;
+        }
+
+        .nav-tab.active {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.2);
+        }
+
+        .nav-tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+        }
+
+        .tab-content {
+            display: flex;
+            flex-direction: column;
+            gap: 25px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Settings Cards & Forms */
+        .settings-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-group label {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .form-control {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 10px 14px;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 0.95em;
+            outline: none;
+            transition: border-color 0.2s;
+            box-sizing: border-box;
+            width: 100%;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+        }
+
+        .btn-settings {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 12px;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 0.95em;
+        }
+
+        .btn-settings:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-settings.secondary {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-settings.secondary:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-settings.danger {
+            background: var(--danger);
+        }
+
+        .btn-settings.danger:hover {
+            background: #e11d48;
+        }
+
+        .settings-list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: rgba(0,0,0,0.15);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            margin-bottom: 10px;
+        }
+
+        .settings-list-item-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .settings-list-item-title {
+            font-weight: 600;
+            font-size: 0.95em;
+            color: #fff;
+        }
+
+        .settings-list-item-subtitle {
+            font-size: 0.8em;
+            color: var(--text-muted);
+        }
+
+        .settings-list-item-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-action-small {
+            padding: 6px 12px;
+            font-size: 0.8em;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            cursor: pointer;
+            font-weight: 600;
+            font-family: inherit;
+            background: rgba(255,255,255,0.05);
+            color: var(--text-main);
+            transition: all 0.2s;
+        }
+
+        .btn-action-small:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .btn-action-small.danger {
+            color: var(--danger);
+            border-color: rgba(244, 63, 94, 0.2);
+        }
+
+        .btn-action-small.danger:hover {
+            background: rgba(244, 63, 94, 0.1);
+        }
+
+        .split-pct-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 12px;
+            margin-top: 5px;
+            background: rgba(0,0,0,0.15);
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
         /* RIGHT PANEL: CHAT */
         .right-panel {
             display: flex;
@@ -729,12 +925,482 @@
             }
         }
 
+        // Initialize Workspace & Dashboard data
+        let workspaceMembers = [];
+        const activeWorkspaceId = "workspace_coloc_taha_mohamed";
+
+        async function fetchTransactions() {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/transactions?limit=10");
+                const transactions = await response.json();
+                
+                const container = document.getElementById("dashboard-transactions-container");
+                if (!container) return;
+                
+                container.innerHTML = "";
+                if (transactions.length === 0) {
+                    container.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9em; padding: 10px;">No transactions recorded yet.</div>`;
+                    return;
+                }
+                
+                transactions.forEach(tx => {
+                    const item = document.createElement("div");
+                    item.className = "settings-list-item";
+                    item.style.marginBottom = "8px";
+                    item.style.padding = "10px 14px";
+                    
+                    const isExpense = tx.amount > 0;
+                    const amountText = (isExpense ? "-" : "+") + Math.abs(tx.amount).toLocaleString() + " MAD";
+                    const amountColor = isExpense ? "var(--danger)" : "var(--success)";
+                    const sharedIndicator = tx.is_shared ? '<span style="font-size:0.8em; margin-left:4px;" title="Shared Expense">👥</span>' : '';
+                    
+                    item.innerHTML = `
+                        <div style="display: flex; align-items: center; gap: 12px; text-align: left;">
+                            <span style="font-size: 1.4em;">${tx.category_icon}</span>
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <span style="font-weight: 600; color: #fff; font-size: 0.9em;">${tx.merchant}</span>
+                                <span style="font-size: 0.75em; color: var(--text-muted);">${tx.date} • ${tx.category_name} • Paid by ${tx.paid_by_name}</span>
+                            </div>
+                        </div>
+                        <div style="text-align: right; display: flex; flex-direction: column; gap: 2px;">
+                            <span style="font-weight: 700; color: ${amountColor}; font-size: 0.95em;">
+                                ${amountText}
+                            </span>
+                            <span style="font-size: 0.7em; color: var(--text-muted);">${tx.account_name}${sharedIndicator}</span>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            } catch (e) {
+                console.error("Error fetching transactions:", e);
+            }
+        }
+
+        async function fetchBudgetLimits() {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/budgets");
+                const budgets = await response.json();
+                
+                const container = document.getElementById("settings-budgets-container");
+                if (!container) return;
+                
+                container.innerHTML = "";
+                const expenseBudgets = budgets.filter(b => b.kind === "expense");
+                
+                if (expenseBudgets.length === 0) {
+                    container.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9em; padding: 10px;">No budget categories found.</div>`;
+                    return;
+                }
+                
+                expenseBudgets.forEach(b => {
+                    const item = document.createElement("div");
+                    item.className = "settings-list-item";
+                    item.style.marginBottom = "8px";
+                    
+                    item.innerHTML = `
+                        <div class="settings-list-item-info" style="text-align: left;">
+                            <span class="settings-list-item-title">${b.icon} ${b.category_name}</span>
+                            <span class="settings-list-item-subtitle">Code: ${b.category_id} | Scope: ${b.scope_type}</span>
+                        </div>
+                        <div class="settings-list-item-actions" style="align-items: center; gap: 10px;">
+                            <input type="number" class="form-control" 
+                                   id="budget-input-${b.category_id}" 
+                                   style="width: 100px; padding: 6px 10px; font-size: 0.9em; height: 34px;" 
+                                   value="${b.monthly_cap}" min="0" step="any" />
+                            <button class="btn-action-small btn-save-budget" data-cat-id="${b.category_id}" style="height: 34px; padding: 0 12px;">Save</button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+                
+                container.querySelectorAll(".btn-save-budget").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        const catId = btn.getAttribute("data-cat-id");
+                        const input = document.getElementById(`budget-input-${catId}`);
+                        if (input) {
+                            const cap = parseFloat(input.value) || 0.0;
+                            saveBudgetLimit(catId, cap);
+                        }
+                    });
+                });
+            } catch (e) {
+                console.error("Error fetching budgets:", e);
+            }
+        }
+
+        async function saveBudgetLimit(categoryId, monthlyCap) {
+            try {
+                const response = await fetch("http://127.0.0.1:8000/budgets", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        category_id: categoryId,
+                        monthly_cap: monthlyCap,
+                        scope_type: "workspace"
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showToast(`Budget limit for ${categoryId} updated successfully!`);
+                    fetchBudgetLimits();
+                } else {
+                    showToast("Error updating budget limit: " + (data.error || "Unknown error"));
+                }
+            } catch (e) {
+                console.error("Error updating budget:", e);
+                showToast("Connection error while updating budget limit.");
+            }
+        }
+
+        async function fetchWorkspaceSettings() {
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/workspace/${activeWorkspaceId}`);
+                const data = await response.json();
+                if (data.error) {
+                    console.error("Error fetching workspace details:", data.error);
+                    return;
+                }
+                
+                // Update workspace badge in header
+                const wsBadge = document.getElementById("ws-badge");
+                if (wsBadge) wsBadge.textContent = data.name;
+                
+                // Populate forms
+                const wsNameInput = document.getElementById("settings-ws-name");
+                if (wsNameInput) wsNameInput.value = data.name;
+                
+                const wsCurrencySelect = document.getElementById("settings-ws-currency");
+                if (wsCurrencySelect) wsCurrencySelect.value = data.currency;
+                
+                const wsSplitSelect = document.getElementById("settings-ws-split");
+                if (wsSplitSelect) wsSplitSelect.value = data.split_rule;
+                
+                workspaceMembers = data.members || [];
+                
+                // Show/hide custom split based on type
+                toggleCustomSplitUI(data.split_rule === "custom", data.custom_percentages);
+            } catch (e) {
+                console.error("Error in fetchWorkspaceSettings:", e);
+            }
+        }
+
+        function toggleCustomSplitUI(show, customPercentages = {}) {
+            const container = document.getElementById("settings-custom-split-container");
+            if (!container) return;
+            
+            if (show) {
+                container.classList.remove("hidden");
+                const grid = document.getElementById("settings-split-pct-grid");
+                if (grid) {
+                    grid.innerHTML = "";
+                    workspaceMembers.forEach(member => {
+                        const val = customPercentages[member.id] !== undefined ? customPercentages[member.id] : 0;
+                        const col = document.createElement("div");
+                        col.className = "form-group";
+                        col.innerHTML = `
+                            <label for="split-pct-${member.id}">${member.name} (%)</label>
+                            <input type="number" class="form-control settings-custom-split-input" 
+                                   id="split-pct-${member.id}" 
+                                   data-user-id="${member.id}" 
+                                   min="0" max="100" step="any" value="${val}" />
+                        `;
+                        grid.appendChild(col);
+                    });
+                }
+            } else {
+                container.classList.add("hidden");
+            }
+        }
+
+        async function saveWorkspaceSettings() {
+            try {
+                const wsNameInput = document.getElementById("settings-ws-name");
+                const wsCurrencySelect = document.getElementById("settings-ws-currency");
+                const wsSplitSelect = document.getElementById("settings-ws-split");
+                
+                if (!wsNameInput || !wsCurrencySelect || !wsSplitSelect) return;
+                
+                const name = wsNameInput.value.trim();
+                const currency = wsCurrencySelect.value;
+                const split_rule = wsSplitSelect.value;
+                
+                if (!name) {
+                    showToast("Workspace name cannot be empty!");
+                    return;
+                }
+                
+                let custom_percentages = {};
+                if (split_rule === "custom") {
+                    const inputs = document.querySelectorAll(".settings-custom-split-input");
+                    let totalPct = 0;
+                    inputs.forEach(input => {
+                        const val = parseFloat(input.value) || 0;
+                        const uid = input.getAttribute("data-user-id");
+                        custom_percentages[uid] = val;
+                        totalPct += val;
+                    });
+                    
+                    if (Math.abs(totalPct - 100) > 0.01) {
+                        showToast(`Percentages must sum to exactly 100% (currently ${totalPct}%)`);
+                        return;
+                    }
+                }
+                
+                const response = await fetch(`http://127.0.0.1:8000/workspace/${activeWorkspaceId}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        name: name,
+                        currency: currency,
+                        split_rule: split_rule,
+                        custom_percentages: split_rule === "custom" ? custom_percentages : null
+                    })
+                });
+                
+                const resData = await response.json();
+                if (resData.success) {
+                    showToast("Workspace settings saved successfully!");
+                    const wsBadge = document.getElementById("ws-badge");
+                    if (wsBadge) wsBadge.textContent = name;
+                    fetchWorkspaceSettings();
+                } else {
+                    showToast("Error saving workspace: " + (resData.error || "Unknown error"));
+                }
+            } catch (e) {
+                console.error("Error saving workspace settings:", e);
+                showToast("Connection error while saving settings.");
+            }
+        }
+
+        async function fetchManageAccounts() {
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/accounts?workspace_id=${activeWorkspaceId}`);
+                const accounts = await response.json();
+                
+                const container = document.getElementById("settings-accounts-list-container");
+                if (!container) return;
+                
+                container.innerHTML = "";
+                if (accounts.length === 0) {
+                    container.innerHTML = `<div style="color: var(--text-muted); font-size: 0.9em;">No active accounts.</div>`;
+                    return;
+                }
+                
+                accounts.forEach(acc => {
+                    const item = document.createElement("div");
+                    item.className = "settings-list-item";
+                    
+                    item.innerHTML = `
+                        <div class="settings-list-item-info">
+                            <span class="settings-list-item-title">${acc.name} (${acc.currency})</span>
+                            <span class="settings-list-item-subtitle">Slug: ${acc.slug} | Type: ${acc.type.replace('_', ' ')} | Balance: ${acc.balance.toLocaleString()} ${acc.currency}</span>
+                        </div>
+                        <div class="settings-list-item-actions">
+                            <button class="btn-action-small btn-rename-acc" data-slug="${acc.slug}" data-name="${acc.name}">Rename</button>
+                            <button class="btn-action-small danger btn-archive-acc" data-slug="${acc.slug}">Archive</button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+                
+                container.querySelectorAll(".btn-rename-acc").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        const slug = btn.getAttribute("data-slug");
+                        const currentName = btn.getAttribute("data-name");
+                        handleRenameAccount(slug, currentName);
+                    });
+                });
+                
+                container.querySelectorAll(".btn-archive-acc").forEach(btn => {
+                    btn.addEventListener("click", () => {
+                        const slug = btn.getAttribute("data-slug");
+                        handleArchiveAccount(slug);
+                    });
+                });
+            } catch (e) {
+                console.error("Error fetching accounts for settings:", e);
+            }
+        }
+
+        async function handleRenameAccount(slug, currentName) {
+            const newName = prompt(`Enter new name for account "${currentName}":`, currentName);
+            if (newName === null) return;
+            const trimmed = newName.trim();
+            if (!trimmed) {
+                showToast("Account name cannot be empty!");
+                return;
+            }
+            if (trimmed === currentName) return;
+            
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/accounts/${slug}/rename`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        new_name: trimmed,
+                        workspace_id: activeWorkspaceId
+                    })
+                });
+                const resData = await response.json();
+                if (resData.success) {
+                    showToast(`Account renamed successfully to "${trimmed}"!`);
+                    fetchManageAccounts();
+                    fetchAccounts();
+                    fetchTransactions();
+                } else {
+                    showToast("Error renaming account: " + (resData.error || "Unknown error"));
+                }
+            } catch (e) {
+                console.error("Error renaming account:", e);
+                showToast("Connection error while renaming account.");
+            }
+        }
+
+        async function handleArchiveAccount(slug) {
+            const confirmed = confirm(`Are you sure you want to archive this account (${slug})? All history will be kept, but the account will no longer appear on your dashboard.`);
+            if (!confirmed) return;
+            
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/accounts/${slug}/archive?workspace_id=${activeWorkspaceId}`, {
+                    method: "POST"
+                });
+                const resData = await response.json();
+                if (resData.success) {
+                    showToast("Account archived successfully!");
+                    fetchManageAccounts();
+                    fetchAccounts();
+                    fetchTransactions();
+                } else {
+                    showToast("Error archiving account: " + (resData.error || "Unknown error"));
+                }
+            } catch (e) {
+                console.error("Error archiving account:", e);
+                showToast("Connection error while archiving account.");
+            }
+        }
+
+        async function createAccount() {
+            try {
+                const nameInput = document.getElementById("new-acc-name");
+                const typeSelect = document.getElementById("new-acc-type");
+                const ownerSelect = document.getElementById("new-acc-owner");
+                const currencySelect = document.getElementById("new-acc-currency");
+                const balanceInput = document.getElementById("new-acc-balance");
+                
+                if (!nameInput || !typeSelect || !ownerSelect || !currencySelect || !balanceInput) return;
+                
+                const name = nameInput.value.trim();
+                const type = typeSelect.value;
+                const owner = type === "personal" ? ownerSelect.value : null;
+                const currency = currencySelect.value;
+                const balance = parseFloat(balanceInput.value) || 0.0;
+                
+                if (!name) {
+                    showToast("Please enter an account name!");
+                    return;
+                }
+                
+                const response = await fetch("http://127.0.0.1:8000/accounts/create", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        workspace_id: activeWorkspaceId,
+                        name: name,
+                        type: type,
+                        owner_user_id: owner,
+                        currency: currency,
+                        balance: balance
+                    })
+                });
+                
+                const resData = await response.json();
+                if (resData.success) {
+                    showToast(`Account "${name}" created successfully!`);
+                    nameInput.value = "";
+                    balanceInput.value = "0";
+                    fetchManageAccounts();
+                    fetchAccounts();
+                    fetchTransactions();
+                } else {
+                    showToast("Error creating account: " + (resData.error || "Unknown error"));
+                }
+            } catch (e) {
+                console.error("Error creating account:", e);
+                showToast("Connection error while creating account.");
+            }
+        }
+
         // Initialize Dashboard data
         window.addEventListener('DOMContentLoaded', () => {
+            fetchWorkspaceSettings();
             fetchAccounts();
             fetchSavingsGoals();
             fetchNotifications();
             fetchPreferences();
+            fetchTransactions();
+
+            // Navigation tabs wiring
+            const tabDashboardBtn = document.getElementById("tab-dashboard-btn");
+            const tabSettingsBtn = document.getElementById("tab-settings-btn");
+            const tabDashboard = document.getElementById("tab-dashboard");
+            const tabSettings = document.getElementById("tab-settings");
+
+            if (tabDashboardBtn && tabSettingsBtn && tabDashboard && tabSettings) {
+                tabDashboardBtn.addEventListener("click", () => {
+                    tabDashboardBtn.classList.add("active");
+                    tabSettingsBtn.classList.remove("active");
+                    tabDashboard.classList.remove("hidden");
+                    tabSettings.classList.add("hidden");
+                });
+
+                tabSettingsBtn.addEventListener("click", () => {
+                    tabSettingsBtn.classList.add("active");
+                    tabDashboardBtn.classList.remove("active");
+                    tabSettings.classList.remove("hidden");
+                    tabDashboard.classList.add("hidden");
+                    
+                    fetchWorkspaceSettings();
+                    fetchManageAccounts();
+                    fetchBudgetLimits();
+                });
+            }
+
+            // Split type dropdown change listener
+            const wsSplitSelect = document.getElementById("settings-ws-split");
+            if (wsSplitSelect) {
+                wsSplitSelect.addEventListener("change", (e) => {
+                    toggleCustomSplitUI(e.target.value === "custom");
+                });
+            }
+
+            // Save Workspace settings listener
+            const btnSaveWorkspace = document.getElementById("btn-save-workspace");
+            if (btnSaveWorkspace) {
+                btnSaveWorkspace.addEventListener("click", () => {
+                    saveWorkspaceSettings();
+                });
+            }
+
+            // Create Account listener
+            const btnCreateAccount = document.getElementById("btn-create-account");
+            if (btnCreateAccount) {
+                btnCreateAccount.addEventListener("click", () => {
+                    createAccount();
+                });
+            }
+
+            // Toggle Account owner input based on type select
+            const newAccTypeSelect = document.getElementById("new-acc-type");
+            const newAccOwnerGroup = document.getElementById("new-acc-owner-group");
+            if (newAccTypeSelect && newAccOwnerGroup) {
+                newAccTypeSelect.addEventListener("change", (e) => {
+                    if (e.target.value === "personal") {
+                        newAccOwnerGroup.classList.remove("hidden");
+                    } else {
+                        newAccOwnerGroup.classList.add("hidden");
+                    }
+                });
+            }
 
             // Set up event listeners dynamically to avoid HTML inline linter errors
             document.getElementById("pref-budget")?.addEventListener("change", (e) => {
@@ -939,6 +1605,7 @@
                 fetchAccounts();
                 fetchSavingsGoals();
                 fetchNotifications();
+                fetchTransactions();
                 
             } catch (error) {
                 console.error("Fetch Error:", error);
@@ -1067,86 +1734,211 @@
     <!-- LEFT PANEL: DASHBOARD WIDGETS -->
     <div class="left-panel">
         <div class="panel-header">
-            <h1>Budget Agent</h1>
+            <h1 id="panel-title-text">Budget Agent</h1>
             <span class="workspace-badge" id="ws-badge">Coloc Taha & Mohamed</span>
         </div>
 
-        <!-- ACCOUNTS BALANCE WIDGET -->
-        <div class="widget-section">
-            <div class="section-title">
-                <span>💳 Accounts & Balances</span>
+        <!-- Navigation Tabs -->
+        <div class="panel-nav">
+            <button class="nav-tab active" id="tab-dashboard-btn">📊 Dashboard</button>
+            <button class="nav-tab" id="tab-settings-btn">⚙️ Settings</button>
+        </div>
+
+        <!-- DASHBOARD TAB CONTENT -->
+        <div class="tab-content" id="tab-dashboard">
+            <!-- ACCOUNTS BALANCE WIDGET -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>💳 Accounts & Balances</span>
+                </div>
+                <div class="accounts-grid" id="accounts-grid">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">Loading accounts...</div>
+                </div>
             </div>
-            <div class="accounts-grid" id="accounts-grid">
-                <div style="color: var(--text-muted); font-size: 0.9em;">Loading accounts...</div>
+
+            <!-- SAVINGS GOALS WIDGET -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>🎯 Savings Goals</span>
+                </div>
+                <div class="goals-grid" id="goals-grid">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">Loading savings goals...</div>
+                </div>
+            </div>
+
+            <!-- NOTIFICATION PREFERENCES -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>⚙️ Notification Preferences</span>
+                </div>
+                <div class="pref-card">
+                    <div class="pref-row">
+                        <div class="pref-info">
+                            <span class="pref-label">Budget Alerts</span>
+                            <span class="pref-desc">Warn when monthly budget caps are breached</span>
+                        </div>
+                        <label class="switch" for="pref-budget">
+                            <input type="checkbox" id="pref-budget" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="pref-row">
+                        <div class="pref-info">
+                            <span class="pref-label">Recurring Subscriptions</span>
+                            <span class="pref-desc">Notify on automated subscription charges</span>
+                        </div>
+                        <label class="switch" for="pref-recurring">
+                            <input type="checkbox" id="pref-recurring" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="pref-row">
+                        <div class="pref-info">
+                            <span class="pref-label">CSV Statement Imports</span>
+                            <span class="pref-desc">Log reports when bank CSV statements are uploaded</span>
+                        </div>
+                        <label class="switch" for="pref-csv">
+                            <input type="checkbox" id="pref-csv" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="pref-row">
+                        <div class="pref-info">
+                            <span class="pref-label">Desktop Push Notifications</span>
+                            <span class="pref-desc">Enable system-level browser desktop push notifications</span>
+                        </div>
+                        <label class="switch" for="pref-push">
+                            <input type="checkbox" id="pref-push" />
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RECENT ALERTS WIDGET -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>🔔 Recent Alerts</span>
+                </div>
+                <div class="alerts-list" id="alerts-list">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">No recent alerts.</div>
+                </div>
+            </div>
+
+            <!-- RECENT TRANSACTIONS WIDGET -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>💸 Recent Transactions</span>
+                </div>
+                <div class="settings-card" id="dashboard-transactions-container" style="gap: 10px; padding: 15px;">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">Loading transactions...</div>
+                </div>
             </div>
         </div>
 
-        <!-- SAVINGS GOALS WIDGET -->
-        <div class="widget-section">
-            <div class="section-title">
-                <span>🎯 Savings Goals</span>
+        <!-- SETTINGS TAB CONTENT -->
+        <div class="tab-content hidden" id="tab-settings">
+            <!-- WORKSPACE CONFIG -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>🏢 Workspace Configuration</span>
+                </div>
+                <div class="settings-card">
+                    <div class="form-group">
+                        <label for="settings-ws-name">Workspace Name</label>
+                        <input type="text" class="form-control" id="settings-ws-name" placeholder="E.g. Coloc Taha & Mohamed" />
+                    </div>
+                    <div class="form-group">
+                        <label for="settings-ws-currency">Default Currency</label>
+                        <select class="form-control" id="settings-ws-currency">
+                            <option value="MAD">MAD (Moroccan Dirham)</option>
+                            <option value="EUR">EUR (Euro)</option>
+                            <option value="USD">USD (US Dollar)</option>
+                            <option value="GBP">GBP (British Pound)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="settings-ws-split">Split Rule Type</label>
+                        <select class="form-control" id="settings-ws-split">
+                            <option value="equal">Equal Split (50/50)</option>
+                            <option value="proportional">Proportional to Income</option>
+                            <option value="custom">Custom Percentage Split</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Custom split percentages grid -->
+                    <div class="form-group hidden" id="settings-custom-split-container">
+                        <label>Member Percentages (Must sum to 100%)</label>
+                        <div class="split-pct-grid" id="settings-split-pct-grid">
+                            <!-- Populated dynamically via JS -->
+                        </div>
+                    </div>
+                    
+                    <button class="btn-settings" id="btn-save-workspace">Save Workspace Settings</button>
+                </div>
             </div>
-            <div class="goals-grid" id="goals-grid">
-                <div style="color: var(--text-muted); font-size: 0.9em;">Loading savings goals...</div>
-            </div>
-        </div>
 
-        <!-- NOTIFICATION PREFERENCES -->
-        <div class="widget-section">
-            <div class="section-title">
-                <span>⚙️ Notification Preferences</span>
-            </div>
-            <div class="pref-card">
-                <div class="pref-row">
-                    <div class="pref-info">
-                        <span class="pref-label">Budget Alerts</span>
-                        <span class="pref-desc">Warn when monthly budget caps are breached</span>
-                    </div>
-                    <label class="switch" for="pref-budget">
-                        <input type="checkbox" id="pref-budget" />
-                        <span class="slider"></span>
-                    </label>
+            <!-- ACCOUNTS LISTING AND ACTIONS -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>💳 Manage Accounts</span>
                 </div>
-                <div class="pref-row">
-                    <div class="pref-info">
-                        <span class="pref-label">Recurring Subscriptions</span>
-                        <span class="pref-desc">Notify on automated subscription charges</span>
-                    </div>
-                    <label class="switch" for="pref-recurring">
-                        <input type="checkbox" id="pref-recurring" />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="pref-row">
-                    <div class="pref-info">
-                        <span class="pref-label">CSV Statement Imports</span>
-                        <span class="pref-desc">Log reports when bank CSV statements are uploaded</span>
-                    </div>
-                    <label class="switch" for="pref-csv">
-                        <input type="checkbox" id="pref-csv" />
-                        <span class="slider"></span>
-                    </label>
-                </div>
-                <div class="pref-row">
-                    <div class="pref-info">
-                        <span class="pref-label">Desktop Push Notifications</span>
-                        <span class="pref-desc">Enable system-level browser desktop push notifications</span>
-                    </div>
-                    <label class="switch" for="pref-push">
-                        <input type="checkbox" id="pref-push" />
-                        <span class="slider"></span>
-                    </label>
+                <div class="settings-card" id="settings-accounts-list-container">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">Loading accounts...</div>
                 </div>
             </div>
-        </div>
 
-        <!-- RECENT ALERTS WIDGET -->
-        <div class="widget-section">
-            <div class="section-title">
-                <span>🔔 Recent Alerts</span>
+            <!-- CREATE ACCOUNT FORM -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>➕ Add New Account</span>
+                </div>
+                <div class="settings-card">
+                    <div class="form-group">
+                        <label for="new-acc-name">Account Name</label>
+                        <input type="text" class="form-control" id="new-acc-name" placeholder="E.g. Sarah Savings" />
+                    </div>
+                    <div class="form-group">
+                        <label for="new-acc-type">Account Type</label>
+                        <select class="form-control" id="new-acc-type">
+                            <option value="personal">Personal (Main/Current)</option>
+                            <option value="shared_current">Shared Current</option>
+                            <option value="shared_savings">Shared Savings / Fund</option>
+                            <option value="business">Business</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="new-acc-owner-group">
+                        <label for="new-acc-owner">Owner (Only for Personal type)</label>
+                        <select class="form-control" id="new-acc-owner">
+                            <option value="user_mohamed">Mohamed</option>
+                            <option value="user_taha">Taha</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-acc-currency">Currency</label>
+                        <select class="form-control" id="new-acc-currency">
+                            <option value="MAD">MAD</option>
+                            <option value="EUR">EUR</option>
+                            <option value="USD">USD</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-acc-balance">Initial Balance</label>
+                        <input type="number" class="form-control" id="new-acc-balance" value="0" step="any" />
+                    </div>
+                    <button class="btn-settings" id="btn-create-account">Create Account</button>
+                </div>
             </div>
-            <div class="alerts-list" id="alerts-list">
-                <div style="color: var(--text-muted); font-size: 0.9em;">No recent alerts.</div>
+
+            <!-- CATEGORY BUDGETS WIDGET -->
+            <div class="widget-section">
+                <div class="section-title">
+                    <span>📊 Category Budget Limits</span>
+                </div>
+                <div class="settings-card" id="settings-budgets-container">
+                    <div style="color: var(--text-muted); font-size: 0.9em;">Loading budget limits...</div>
+                </div>
             </div>
         </div>
     </div>

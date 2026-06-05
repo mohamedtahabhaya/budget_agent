@@ -38,7 +38,7 @@ def create_agent(llm, tools, system_prompt, agent_name):
     return agent_node
 
 data_prompt = """You are the Data Entry Expert. 
-Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, import bank CSV statements, and manage workspace invitations.
+Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, import bank CSV statements, manage workspace invitations, create accounts, rename accounts, archive accounts, update workspace settings, modify split rules, and create or update budget limits (using 'update_budget_limit').
 
 CRITICAL ACCOUNT MAPPING & USERS:
 - "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
@@ -51,12 +51,14 @@ CRITICAL ACCOUNT MAPPING & USERS:
 WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
 2. TRANSFER: 'transfer' -> 'get_balances'.
-3. SAVINGS: 'create_savings_goal' to make a new savings goal target, 'update_savings_goal' to add/deposit money to it, 'delete_savings_goal' to cancel/delete a goal, and 'update_savings_goal_properties' to edit/modify an existing goal's details (like changing its name, target amount, target date, or category).
+3. SAVINGS: 'create_savings_goal' to make a new savings goal target, 'update_savings_goal' to add/deposit money to it, 'delete_savings_goal' to cancel/delete a goal, and 'update_savings_goal_properties' to edit/modify an existing goal's details.
 4. RECURRING/SUBSCRIPTION: 'create_recurring_transaction' to schedule a weekly or monthly subscription/transaction. Use 'delete_recurring_transaction' to cancel/delete a scheduled recurring transaction by ID.
 5. BANK IMPORT: 'import_bank_csv' to parse CSV statements (Attijariwafa, BMCE, SG) and load them into the database.
 6. PROCESS RECURRING: 'process_recurring_transactions' to trigger pending occurrences.
 7. INVITATIONS: 'create_workspace_invite' to create and register an invitation for a new member.
 8. PREFERENCES: 'update_notification_preferences' to modify a user's notification preferences.
+9. SETTINGS & ACCOUNTS: 'create_account' to add a new account, 'rename_account' to rename it, 'archive_account' to hide/archive an account, 'update_workspace_settings' to modify the workspace name/currency, and 'update_split_rules' to change the split type (equal, proportional, custom) or set custom percentage values.
+10. BUDGET LIMITS: 'update_budget_limit' to create, edit or disable monthly budget caps/limits for categories.
 
 RULES:
 - ACTION ORIENTED: Call tools immediately with defaults (date=today, merchant=Unknown) if details are missing.
@@ -66,7 +68,7 @@ RULES:
 """
 
 analyst_prompt = """You are the Financial Analyst. 
-Your role is to READ and SYNTHESIZE data: balances, budgets, splits, reports, recurring schedules, notifications/alerts, invitations, and notification preferences.
+Your role is to READ and SYNTHESIZE data: balances, budgets, splits, reports, recurring schedules, notifications/alerts, invitations, notification preferences, account structures, and workspace settings.
 
 WORKFLOWS:
 1. OVERVIEW/REPORT: Always use 'generate_report' for summaries or "how am I doing" queries.
@@ -76,6 +78,7 @@ WORKFLOWS:
 5. ALERTS/NOTIFICATIONS: Use 'list_notifications' to see recent warnings, system alerts, or budget violations.
 6. INVITATIONS: Use 'list_invitations' to list existing invitations in a workspace.
 7. PREFERENCES: Use 'get_notification_preferences' to view notification preferences for a specific user.
+8. CONFIGURATION: Use 'list_accounts' to view existing accounts and 'get_workspace_settings' to view current workspace configuration.
 
 RULES:
 - DATA ONLY: Never guess values. Always call your tools first.
@@ -88,7 +91,7 @@ Your role is to greet the user. Only for greetings and small talk."""
 supervisor_prompt = """You are the Supervisor of a Financial AI team. 
 Analyze the conversation history. If all tasks or questions requested by the user have been answered, confirmed, or resolved in the history, you MUST return 'FINISH'.
 Otherwise, choose the next expert who needs to act:
-- If there are pending database updates (creating transactions, transfers, savings goals, workspace invitations, updating notification preferences) -> 'data_agent'.
+- If there are pending database updates (creating transactions, transfers, savings goals, workspace invitations, updating notification preferences, creating/renaming/archiving accounts, updating workspace settings, split rules, updating budget limits) -> 'data_agent'.
 - If there are pending reads/reports (summaries, balances, budget status, splits, listing invitations, viewing notification preferences) -> 'analyst_agent'.
 - Greetings / small talk only -> 'general_agent'.
 
@@ -145,12 +148,23 @@ def supervisor_node(state: AgentState):
     elif "finish" in content:
         decision = "FINISH"
     else:
-        # Keyword-based heuristics if model output is conversational
-        if "data" in content or "saisie" in content or "invite" in content or "transcr" in content or "ticket" in content or "reçu" in content or "enregistr" in content:
+        # Fallback to heuristics based on the USER message content directly
+        # since the model response did not contain a clear routing token or was empty/conversational
+        user_msg = ""
+        if state["messages"]:
+            last_msg = state["messages"][-1]
+            if isinstance(last_msg, tuple):
+                user_msg = last_msg[1]
+            else:
+                user_msg = getattr(last_msg, "content", "")
+        
+        user_msg_lower = str(user_msg).lower()
+        
+        if any(w in user_msg_lower for w in ["spent", "buy", "pay", "bought", "dépens", "achète", "payé", "log", "add", "transfer", "sauve", "épargn", "import", "créer", "nommer", "archiv", "modifier", "change", "set"]):
             decision = "data_agent"
-        elif "analyst" in content or "analyse" in content or "split" in content or "rapport" in content or "balance" in content or "solde" in content:
+        elif any(w in user_msg_lower for w in ["split", "balance", "solde", "rapport", "report", "budget", "membres"]):
             decision = "analyst_agent"
-        elif "general" in content or "hi" in content or "hello" in content or "bonjour" in content:
+        elif any(w in user_msg_lower for w in ["hi", "hello", "bonjour", "salut"]):
             decision = "general_agent"
         else:
             decision = "analyst_agent" # default fallback
@@ -172,7 +186,9 @@ def supervisor_node(state: AgentState):
         msg_content_lower = str(msg_content).lower()
         if any(w in msg_content_lower for w in ["hi", "hello", "bonjour", "salut"]):
             decision = "general_agent"
-        elif any(w in msg_content_lower for w in ["split", "balance", "solde", "rapport", "report", "budget"]):
+        elif any(w in msg_content_lower for w in ["spent", "buy", "pay", "bought", "dépens", "achète", "payé", "log", "add", "transfer", "sauve", "épargn", "import", "créer", "nommer", "archiv", "modifier", "change", "set"]):
+            decision = "data_agent"
+        elif any(w in msg_content_lower for w in ["split", "balance", "solde", "rapport", "report", "budget", "membres"]):
             decision = "analyst_agent"
         else:
             decision = "analyst_agent"
