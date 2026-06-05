@@ -1,11 +1,65 @@
+import os
+import json
+from dotenv import load_dotenv
+load_dotenv()
+
 from sqlalchemy import create_engine, Column, String, Float, Integer, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.types import TypeDecorator, VARCHAR
+from sqlalchemy.dialects.postgresql import JSONB
 
-import os
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///budget.db")
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError(
+        "DATABASE_URL environment variable is missing. "
+        "Please ensure it is defined in your .env file, "
+        "e.g., DATABASE_URL=postgresql://postgres:postgrespassword@localhost:5433/budget_db"
+    )
+
+# SQLite connection args are specific to SQLite and should not be passed to PostgreSQL
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DATABASE_URL)
+
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+class JSONBString(TypeDecorator):
+    """Custom type that uses JSONB on PostgreSQL and VARCHAR/TEXT on SQLite/others,
+    but always interacts as a Python string (JSON serialized) in the application layer.
+    """
+    impl = VARCHAR
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(JSONB())
+        else:
+            return dialect.type_descriptor(VARCHAR())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except ValueError:
+                    return value
+            return value
+        if not isinstance(value, str):
+            return json.dumps(value)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if dialect.name == "postgresql":
+            return json.dumps(value)
+        return value
+
 
 class WorkspaceModel(Base):
     __tablename__ = "workspaces"
@@ -96,7 +150,8 @@ class SplitRuleModel(Base):
     __tablename__ = "split_rules"
     id = Column(Integer, primary_key=True, index=True)
     workspace_id = Column(String, ForeignKey("workspaces.id"), unique=True)
-    member_percentages = Column(String)
+    member_percentages = Column(JSONBString)
+
 
 class RecurringTransactionModel(Base):
     __tablename__ = "recurring_transactions"
@@ -147,9 +202,12 @@ def seed_database():
         if db.query(WorkspaceModel).count() == 0:
             ws = WorkspaceModel(id=ws_id, name="Coloc Taha & Mohamed", split_rule="equal")
             db.add(ws)
+            db.commit()
+            
             u1 = UserModel(id="user_mohamed", workspace_id=ws_id, name="Mohamed", role="owner", income_mad=15000.0)
             u2 = UserModel(id="user_taha", workspace_id=ws_id, name="Taha", role="member", income_mad=10000.0)
             db.add_all([u1, u2])
+            db.commit()
             
             p1 = NotificationPreferenceModel(user_id="user_mohamed")
             p2 = NotificationPreferenceModel(user_id="user_taha")
@@ -162,8 +220,6 @@ def seed_database():
             )
             db.add(coloc_split)
             db.commit()
-
-
 
         if db.query(AccountModel).count() == 0:
             mohamed_account = AccountModel(
@@ -202,6 +258,7 @@ def seed_database():
                 balance=0.0
             )
             db.add_all([mohamed_account, taha_account, savings_account, joint_account])
+            db.commit()
 
         if db.query(CategoryModel).count() == 0:
             default_categories = [
@@ -219,6 +276,7 @@ def seed_database():
                 CategoryModel(id="cat_income", workspace_id=ws_id, name="Income", icon="💵", kind="income")
             ]
             db.add_all(default_categories)
+            db.commit()
 
             demo_budget = BudgetRuleModel(
                 category_id="cat_groceries",
@@ -228,7 +286,6 @@ def seed_database():
                 alert_threshold_pct=80.0
             )
             db.add(demo_budget)
-
-        db.commit()
+            db.commit()
 
 seed_database()

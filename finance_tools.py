@@ -102,8 +102,9 @@ def delete_transaction(transaction_id: Union[int, str]) -> str:
         tx = db.query(TransactionModel).filter(TransactionModel.id == tx_id).first()
         if not tx: return f"Error: Transaction {tx_id} not found."
         
-        account = db.query(AccountModel).filter(AccountModel.id == tx.account_id).first()
+        account = db.query(AccountModel).filter(AccountModel.id == tx.account_id).with_for_update().first()
         if account:
+
             account.balance += tx.amount
             
         db.delete(tx)
@@ -254,8 +255,9 @@ def create_transaction(account_slug: str, amount: Union[float, str], date: str, 
     """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
     db = SessionLocal()
     try:
-        account = db.query(AccountModel).filter(AccountModel.slug == account_slug).first()
+        account = db.query(AccountModel).filter(AccountModel.slug == account_slug).with_for_update().first()
         if not account: return f"Error: Account '{account_slug}' not found. Use 'main_current' as default."
+
         
         account.balance -= amount
         
@@ -669,8 +671,9 @@ def transfer(source_slug: str, dest_slug: str, amount: Union[float, str], initia
         
     db = SessionLocal()
     try:
-        source = db.query(AccountModel).filter(AccountModel.slug == source_slug).first()
-        dest = db.query(AccountModel).filter(AccountModel.slug == dest_slug).first()
+        source = db.query(AccountModel).filter(AccountModel.slug == source_slug).with_for_update().first()
+        dest = db.query(AccountModel).filter(AccountModel.slug == dest_slug).with_for_update().first()
+
         
         if not source:
             return f"Error: Source account '{source_slug}' not found."
