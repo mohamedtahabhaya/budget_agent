@@ -494,6 +494,23 @@ async def get_notifications_list(workspace_id: str = "workspace_coloc_taha_moham
     finally:
         db.close()
 
+@app.post("/notifications/read")
+async def mark_notifications_read(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    from database import SessionLocal, NotificationModel
+    db = SessionLocal()
+    try:
+        db.query(NotificationModel).filter(
+            NotificationModel.workspace_id == workspace_id,
+            NotificationModel.is_read == False
+        ).update({"is_read": True}, synchronize_session=False)
+        db.commit()
+        return {"success": True}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
+    finally:
+        db.close()
+
 
 class UpdateBudgetRequest(BaseModel):
     category_id: str
@@ -580,16 +597,65 @@ async def get_transactions(workspace_id: str = "workspace_coloc_taha_mohamed", l
                 "amount": t.amount,
                 "date": t.date,
                 "merchant": t.merchant,
+                "category_id": t.category_id,
                 "category_name": cat.name if cat else t.category_id,
                 "category_icon": cat.icon if cat else "📝",
                 "account_name": acc.name if acc else "Unknown",
+                "account_currency": acc.currency if acc else "MAD",
                 "paid_by_name": usr.name if usr else t.user_id,
-                "is_shared": t.is_shared
+                "is_shared": t.is_shared,
+                "note": t.note or ""
             })
         return result
     finally:
         db.close()
 
+@app.delete("/transactions/{transaction_id}")
+async def delete_transaction_api(transaction_id: int):
+    from finance_tools import delete_transaction
+    res = delete_transaction.invoke({"transaction_id": str(transaction_id)})
+    if res.startswith("Success:"):
+        return {"success": True, "message": res}
+    else:
+        return {"success": False, "error": res}
+
+class ImportCSVRequest(BaseModel):
+    csv_content: str
+    account_slug: str
+    workspace_id: str = "workspace_coloc_taha_mohamed"
+    bank_name: Optional[str] = None
+
+@app.post("/import-bank-csv")
+async def import_bank_csv_api(request: ImportCSVRequest):
+    import uuid
+    import os
+    from finance_tools import import_bank_csv
+    
+    # Save the CSV content to a temporary file
+    temp_dir = "scratch"
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_filename = f"{temp_dir}/temp_import_{uuid.uuid4().hex}.csv"
+    
+    try:
+        with open(temp_filename, "w", encoding="utf-8") as f:
+            f.write(request.csv_content)
+        
+        # Invoke the import_bank_csv tool
+        res = import_bank_csv.invoke({
+            "file_path": temp_filename,
+            "account_slug": request.account_slug,
+            "workspace_id": request.workspace_id,
+            "bank_name": request.bank_name
+        })
+        
+        if res.startswith("Error"):
+            return {"success": False, "error": res}
+        return {"success": True, "message": res}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
 
 import os
 origins = os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",")
@@ -605,7 +671,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str
+    session_id: str = "default_session"
     is_approval: Optional[bool] = False
     image_data: Optional[str] = None
     audio_data: Optional[str] = None
@@ -627,7 +693,7 @@ async def chat_endpoint(request: ChatRequest):
                 import os
                 import base64
                 
-                temp_audio_path = "scratch/temp_voice.webm"
+                temp_audio_path = "scratch/temp_voice.m4a"
                 os.makedirs("scratch", exist_ok=True)
                 with open(temp_audio_path, "wb") as f:
                     f.write(base64.b64decode(request.audio_data))
@@ -677,8 +743,10 @@ async def chat_endpoint(request: ChatRequest):
 
                 elif kind == "on_tool_start":
                     tool_name = event["name"]
+                    tool_input = event["data"].get("input")
+                    print(f"\n[TOOL START] {tool_name} with inputs: {tool_input}\n")
                     agent_display = node_name.replace("_", " ").title()
-                    yield f"data: {json.dumps({'type': 'status', 'content': f'⚙️ {agent_display} utilise {tool_name}...'})}\n\n"
+                    yield f"data: {json.dumps({'type': 'status', 'content': f'⚙️ {agent_display} is using {tool_name}...'})}\n\n"
 
                 elif kind == "on_tool_end":
                     tool_name = event["name"]

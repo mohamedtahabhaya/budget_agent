@@ -240,9 +240,20 @@ class CreateTransactionSchema(BaseModel):
     paid_by: str = Field(description="User ID")
     note: str = ""
     is_shared: Union[bool, str] = Field(default=False, description="Set to True if this is a personal account expense that should be split with the workspace.")
+    currency: Optional[str] = Field(default=None, description="Optional currency code of the transaction (e.g., 'EUR', 'USD', 'MAD'). If different from the account's currency, it will be auto-converted.")
 
 @tool(args_schema=CreateTransactionSchema)
-def create_transaction(account_slug: str, amount: Union[float, str], date: str, merchant: str, category_id: str, paid_by: str, note: str = "", is_shared: Union[bool, str] = False) -> str:
+def create_transaction(
+    account_slug: str, 
+    amount: Union[float, str], 
+    date: str, 
+    merchant: str, 
+    category_id: str, 
+    paid_by: str, 
+    note: str = "", 
+    is_shared: Union[bool, str] = False,
+    currency: Optional[str] = None
+) -> str:
     """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
     # Coerce parameters to correct types robustly
     if isinstance(amount, str):
@@ -252,13 +263,37 @@ def create_transaction(account_slug: str, amount: Union[float, str], date: str, 
             return f"Error: amount must be a number, got '{amount}'"
     if isinstance(is_shared, str):
         is_shared = is_shared.lower().strip() in ["true", "1", "yes", "on"]
-    """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
+        
     db = SessionLocal()
     try:
         account = db.query(AccountModel).filter(AccountModel.slug == account_slug).with_for_update().first()
         if not account: return f"Error: Account '{account_slug}' not found. Use 'main_current' as default."
 
+        # Perform auto-conversion if currency is specified and differs from the account's currency
+        EXCHANGE_RATES = {
+            "MAD": 1.0,
+            "EUR": 11.0,
+            "USD": 10.0,
+            "GBP": 13.0
+        }
         
+        orig_amount = amount
+        orig_currency = currency.upper().strip() if currency else None
+        acc_currency = account.currency.upper().strip() if account.currency else "MAD"
+        
+        if orig_currency and orig_currency != acc_currency:
+            rate_from = EXCHANGE_RATES.get(orig_currency, 1.0)
+            rate_to = EXCHANGE_RATES.get(acc_currency, 1.0)
+            # Convert orig_amount to base (MAD) first, then to target currency
+            amount_in_mad = amount * rate_from
+            amount = amount_in_mad / rate_to
+            
+            conversion_note = f"[{orig_amount} {orig_currency} converted to {acc_currency}]"
+            if note:
+                note = f"{note} {conversion_note}"
+            else:
+                note = conversion_note
+
         account.balance -= amount
         
         new_transaction = TransactionModel(
@@ -283,13 +318,14 @@ def create_transaction(account_slug: str, amount: Union[float, str], date: str, 
             "user_id": paid_by
         })
         
-        if "CRITICAL" in budget_info:
+        if "CRITICAL" in budget_info or "WARNING" in budget_info:
             from database import NotificationPreferenceModel
             user_pref = db.query(NotificationPreferenceModel).filter(NotificationPreferenceModel.user_id == paid_by).first()
             if not user_pref or user_pref.budget_alerts_enabled:
+                alert_type = "CRITICAL" if "CRITICAL" in budget_info else "WARNING"
                 notif = NotificationModel(
                     workspace_id=account.workspace_id,
-                    message=f"CRITICAL Budget Alert: {budget_info}",
+                    message=f"{alert_type} Budget Alert: {budget_info}",
                     timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     is_read=False
                 )
@@ -349,26 +385,33 @@ def list_savings_goals(workspace_id: str) -> str:
         db.close()
 
 class UpdateSavingsGoalSchema(BaseModel):
-    workspace_id: str
-    amount: Union[float, str]
+    workspace_id: str = Field(description="Workspace ID")
+    amount: Union[float, str] = Field(description="Amount to save (positive to deposit, negative to withdraw)")
     goal_id: Optional[Union[int, str]] = Field(default=None, description="Goal ID")
     goal_name: Optional[str] = Field(default=None, description="Goal Name")
+    initiated_by: Optional[str] = Field(default="user_mohamed", description="The user ID of the person saving the money")
 
 @tool(args_schema=UpdateSavingsGoalSchema)
-def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None) -> str:
-    """Add money to a goal by ID or name. amount MUST be a number."""
+def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None, initiated_by: str = "user_mohamed") -> str:
+    """Add or withdraw money from a savings goal by ID or name, executing a real database transfer between the member's personal account and the Emergency Fund."""
     if isinstance(amount, str):
         try:
             amount = float(amount.replace(",", ".").replace(" ", "").strip())
         except ValueError:
             return f"Error: amount must be a number, got '{amount}'"
+            
+    if amount == 0:
+        return "Error: Amount must be non-zero."
+        
     if isinstance(goal_id, str):
         try:
             goal_id = int(goal_id.strip()) if goal_id.strip() else None
         except ValueError:
             goal_id = None
+            
     db = SessionLocal()
     try:
+        # Find the savings goal
         query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
         if goal_id:
             goal = query.filter(SavingsGoalModel.id == goal_id).first()
@@ -377,10 +420,82 @@ def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: O
         else:
             return "Error: Provide goal_id or goal_name."
             
-        if not goal: return "Error: Goal not found."
+        if not goal:
+            return "Error: Goal not found."
+            
+        # Locate the user's personal account and the shared savings account
+        user_account = db.query(AccountModel).filter(
+            AccountModel.workspace_id == workspace_id,
+            AccountModel.owner_user_id == initiated_by,
+            AccountModel.type == "personal"
+        ).with_for_update().first()
+        
+        savings_account = db.query(AccountModel).filter(
+            AccountModel.workspace_id == workspace_id,
+            AccountModel.slug == "emergency_fund"
+        ).with_for_update().first()
+        
+        if not savings_account:
+            return "Error: Emergency Fund savings account ('emergency_fund') not found in this workspace."
+            
+        if amount > 0:
+            # Deposit: Personal Account -> Emergency Fund
+            source = user_account
+            dest = savings_account
+            if not source:
+                return f"Error: Personal account for user '{initiated_by}' not found."
+            if source.balance < amount:
+                return f"Error: Insufficient funds in personal account '{source.name}'. Current balance is {source.balance} MAD."
+                
+            source.balance -= amount
+            dest.balance += amount
+        else:
+            # Withdrawal: Emergency Fund -> Personal Account
+            source = savings_account
+            dest = user_account
+            abs_amount = abs(amount)
+            if not dest:
+                return f"Error: Personal account for user '{initiated_by}' not found to return funds to."
+            if source.balance < abs_amount:
+                return f"Error: Insufficient funds in Emergency Fund. Current savings balance is {source.balance} MAD."
+                
+            source.balance -= abs_amount
+            dest.balance += abs_amount
+            
+        # Update goal progress
         goal.current += amount
+        
+        # Log Transaction History
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        note_text = f"Goal '{goal.name}' deposit" if amount > 0 else f"Goal '{goal.name}' withdrawal"
+        
+        tx_source = TransactionModel(
+            account_id=source.id,
+            user_id=initiated_by,
+            category_id="cat_savings",
+            amount=abs(amount),
+            date=date_str,
+            merchant="Savings Goal",
+            note=f"{note_text} - to {dest.name}" if amount > 0 else f"{note_text} - from {source.name}"
+        )
+        tx_dest = TransactionModel(
+            account_id=dest.id,
+            user_id=initiated_by,
+            category_id="cat_savings",
+            amount=-abs(amount),
+            date=date_str,
+            merchant="Savings Goal",
+            note=f"{note_text} - from {source.name}" if amount > 0 else f"{note_text} - to {dest.name}"
+        )
+        
+        db.add_all([tx_source, tx_dest])
         db.commit()
-        return f"Updated {goal.name}: {goal.current}/{goal.target} MAD."
+        
+        action_word = "Saved" if amount > 0 else "Withdrew"
+        return f"Success: {action_word} {abs(amount)} MAD for goal '{goal.name}'. Real balances updated -> {source.name}: {source.balance} MAD, {dest.name}: {dest.balance} MAD. Goal progress -> {goal.current}/{goal.target} MAD."
+    except Exception as e:
+        db.rollback()
+        return f"Database Error: {str(e)}"
     finally:
         db.close()
 
@@ -568,17 +683,30 @@ def generate_report(workspace_id: str, month: Optional[str] = None) -> str:
             
             report += f"- **{u.name}**: Spent {outflow:,.2f} | Received {-inflow:,.2f} MAD\n"
             
-        report += "\n## Top Categories\n"
+        report += "\n## Top Categories & Budgets\n"
         cats = db.query(TransactionModel.category_id, func.sum(TransactionModel.amount).label('total')).join(
             AccountModel, TransactionModel.account_id == AccountModel.id
         ).filter(
             TransactionModel.amount > 0, 
             TransactionModel.date.like(f"{target_month}%"),
             AccountModel.workspace_id == workspace_id
-        ).group_by(TransactionModel.category_id).order_by(desc('total')).limit(5).all()
+        ).group_by(TransactionModel.category_id).order_by(desc('total')).all()
         
         for cid, total in cats:
-            report += f"- {cid}: {total:,.2f} MAD\n"
+            cat = db.query(CategoryModel).filter(CategoryModel.id == cid).first()
+            cname = cat.name if cat else cid
+            rule = db.query(BudgetRuleModel).filter(BudgetRuleModel.category_id == cid).first()
+            limit_str = f"{rule.monthly_cap:,.2f} MAD" if rule else "no limit set"
+            status_str = ""
+            if rule:
+                pct = (total / rule.monthly_cap) * 100
+                if pct >= 100:
+                    status_str = " (OVER BUDGET)"
+                elif pct >= rule.alert_threshold_pct:
+                    status_str = " (WARNING)"
+                else:
+                    status_str = " (OK)"
+            report += f"- **{cname}** ({cid}): {total:,.2f} MAD spent | Limit: {limit_str}{status_str}\n"
             
         report += "\n## Savings Goals\n"
         gs = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id).all()

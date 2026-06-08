@@ -13,11 +13,49 @@ from pydantic import BaseModel
 from typing import Literal
 from datetime import datetime
 from langchain_groq import ChatGroq
+import time
 
-llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", streaming=True)
+llm = ChatGroq(model="openai/gpt-oss-120b", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
+
+def prune_messages(messages, max_messages=12):
+    if len(messages) <= max_messages:
+        return messages
+    
+    # Take the last max_messages
+    pruned = messages[-max_messages:]
+    
+    # We must ensure we start with a HumanMessage so the conversation history makes sense to the LLM
+    # and we do not start with a ToolMessage without its preceding AIMessage with tool_calls.
+    while pruned and getattr(pruned[0], "type", "") != "human":
+        pruned = pruned[1:]
+        
+    if not pruned:
+        # Fallback to last 6 messages if everything got pruned
+        return messages[-6:]
+        
+    return pruned
+
+def invoke_llm_with_retry(model, messages, max_retries=3, initial_delay=1.0):
+    delay = initial_delay
+    for attempt in range(max_retries):
+        try:
+            # Add a small delay between consecutive LLM steps inside the graph
+            # to prevent hitting Groq's low TPM/RPM limit
+            time.sleep(0.5)
+            return model.invoke(messages)
+        except Exception as e:
+            err_msg = str(e)
+            if "rate_limit" in err_msg.lower() or "429" in err_msg or "tpm" in err_msg.lower() or "rpm" in err_msg.lower():
+                print(f"[LLM RATE LIMIT] Hit rate limit on attempt {attempt+1}/{max_retries}. Retrying in {delay}s... (Error: {err_msg})")
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                raise e
+    # Final try
+    return model.invoke(messages)
 
 def create_agent(llm, tools, system_prompt, agent_name):
     """Fonction usine pour créer nos experts financiers."""
@@ -31,8 +69,9 @@ def create_agent(llm, tools, system_prompt, agent_name):
         user = state.get("user_id", "default_user")
         context_prompt = f"{system_prompt}\n\nCURRENT CONTEXT:\n- Workspace ID: {workspace}\n- User ID (The person talking to you): {user}\n- Today's Date: {datetime.now().strftime('%Y-%m-%d')}"
             
-        messages_for_llm = [SystemMessage(content=context_prompt)] + state["messages"]
-        response = llm_with_tools.invoke(messages_for_llm)
+        pruned_history = prune_messages(state["messages"])
+        messages_for_llm = [SystemMessage(content=context_prompt)] + pruned_history
+        response = invoke_llm_with_retry(llm_with_tools, messages_for_llm)
         return {"messages": [response], "sender": agent_name}
         
     return agent_node
@@ -41,12 +80,10 @@ data_prompt = """You are the Data Entry Expert.
 Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, import bank CSV statements, manage workspace invitations, create accounts, rename accounts, archive accounts, update workspace settings, modify split rules, and create or update budget limits (using 'update_budget_limit').
 
 CRITICAL ACCOUNT MAPPING & USERS:
+- If 'Taha' is mentioned, Taha speaks, Taha paid, or Taha transfers, you MUST use `account_slug: 'taha_personal'` and `paid_by: 'user_taha'`. Do NOT default to 'main_current' when Taha is involved.
+- If 'Mohamed' is mentioned, Mohamed speaks, Mohamed paid, or Mohamed transfers, you MUST use `account_slug: 'main_current'` and `paid_by: 'user_mohamed'`.
 - "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
 - "Emergency Fund" or "Emergency account" -> Use slug: 'emergency_fund' (shared savings account).
-- Mohamed's Personal account / "Main Account" / "Personal" (when Mohamed speaks or default) -> Use slug: 'main_current' and set paid_by: 'user_mohamed'.
-- Taha's Personal account / "Taha's account" / "Taha Personal" (when Taha speaks or Taha is mentioned) -> Use slug: 'taha_personal' and set paid_by: 'user_taha'.
-- If the request states Taha paid or Taha transfers, use user_taha and taha_personal.
-- If the request states Mohamed paid or Mohamed transfers, use user_mohamed and main_current.
 
 WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
@@ -62,6 +99,7 @@ WORKFLOWS:
 
 RULES:
 - ACTION ORIENTED: Call tools immediately with defaults (date=today, merchant=Unknown) if details are missing.
+- CURRENCY CONVERSIONS: NEVER convert currencies yourself! If the user specifies an amount in a currency (e.g. Euro/EUR, Dollar/USD, GBP) other than the target account's currency, you MUST pass that currency code (e.g. 'EUR', 'USD') to the 'currency' parameter of the tool and pass the original user amount (e.g. 100) to the 'amount' parameter. The tool itself will automatically convert the amount.
 - TRANSFER VS SAVINGS GOAL: If the destination target matches any registered bank account name or slug (like 'emergency_fund' / "Emergency Fund", 'joint_current' / "Joint Account"), you MUST use the 'transfer' tool. Only use 'update_savings_goal' or 'create_savings_goal' if the user explicitly refers to a virtual savings target, goal progress, or goal creation.
 - NUMBERS ONLY: Use raw floats.
 - LANGUAGE: ALWAYS respond in the user's language.
@@ -128,11 +166,12 @@ def supervisor_node(state: AgentState):
             else:
                 cleaned_messages.append(HumanMessage(content=str(msg.content) if hasattr(msg, "content") else str(msg)))
             
-    messages_for_llm = [SystemMessage(content=supervisor_prompt)] + cleaned_messages
+    pruned_history = prune_messages(cleaned_messages)
+    messages_for_llm = [SystemMessage(content=supervisor_prompt)] + pruned_history
     
     # We invoke the LLM directly without structured output to bypass tool calling / API validation bugs on Groq
     try:
-        res = llm.invoke(messages_for_llm)
+        res = invoke_llm_with_retry(llm, messages_for_llm)
         content = res.content.lower().strip()
     except Exception as e:
         print(f"[SUPERVISOR ERROR] API invocation failed: {e}")
