@@ -163,7 +163,7 @@ export default function Chat({
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.8,
+      quality: 0.5,
     });
 
     if (!result.canceled && result.assets && result.assets[0].uri) {
@@ -188,11 +188,35 @@ export default function Chat({
     setSending(true);
 
     if (img) {
-      FileSystem.readAsStringAsync(img, {
-        encoding: FileSystem.EncodingType.Base64,
-      }).then(base64Img => {
-        sendPayload({ message: text, image_data: base64Img });
-      });
+      const readImgPromise = Platform.OS === 'web'
+        ? fetch(img)
+            .then(res => res.blob())
+            .then(blob => new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64data = reader.result as string;
+                const base64 = base64data.split(',')[1];
+                resolve(base64);
+              };
+              reader.onerror = () => reject(new Error('Failed to convert blob to base64'));
+              reader.readAsDataURL(blob);
+            }))
+        : FileSystem.readAsStringAsync(img, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+
+      readImgPromise
+        .then(base64Img => {
+          sendPayload({ message: text, image_data: base64Img });
+        })
+        .catch(err => {
+          console.error("Failed to read image file:", err);
+          setSending(false);
+          setMessages(prev => [
+            ...prev,
+            { id: Date.now().toString(), sender: 'agent', text: `⚠️ Failed to read the selected image: ${err.message || err}` }
+          ]);
+        });
     } else {
       sendPayload({ message: text });
     }
@@ -325,7 +349,7 @@ export default function Chat({
     <KeyboardAvoidingView
       behavior="padding"
       style={styles.container}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 80}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 50}
     >
       <ScrollView
         ref={scrollViewRef}

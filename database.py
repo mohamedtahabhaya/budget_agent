@@ -231,6 +231,15 @@ def seed_database():
                 currency="MAD",
                 balance=5000.0
             )
+            mohamed_savings = AccountModel(
+                workspace_id=ws_id,
+                name="Mohamed Savings",
+                slug="mohamed_savings",
+                type="savings",
+                owner_user_id="user_mohamed",
+                currency="MAD",
+                balance=0.0
+            )
             taha_account = AccountModel(
                 workspace_id=ws_id,
                 name="Taha Personal",
@@ -240,12 +249,21 @@ def seed_database():
                 currency="MAD",
                 balance=5000.0
             )
+            taha_savings = AccountModel(
+                workspace_id=ws_id,
+                name="Taha Savings",
+                slug="taha_savings",
+                type="savings",
+                owner_user_id="user_taha",
+                currency="MAD",
+                balance=0.0
+            )
             savings_account = AccountModel(
                 workspace_id=ws_id,
                 name="Emergency Fund",
                 slug="emergency_fund",
                 type="shared_savings",
-                owner_user_id="user_mohamed",
+                owner_user_id=None,
                 currency="MAD",
                 balance=0.0
             )
@@ -257,7 +275,7 @@ def seed_database():
                 owner_user_id=None, 
                 balance=0.0
             )
-            db.add_all([mohamed_account, taha_account, savings_account, joint_account])
+            db.add_all([mohamed_account, mohamed_savings, taha_account, taha_savings, savings_account, joint_account])
             db.commit()
 
         if db.query(CategoryModel).count() == 0:

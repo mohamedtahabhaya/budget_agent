@@ -470,7 +470,7 @@ async def get_accounts(workspace_id: str = "workspace_coloc_taha_mohamed"):
     db = SessionLocal()
     try:
         accounts = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.is_archived == False).all()
-        return [{"name": acc.name, "slug": acc.slug, "balance": acc.balance, "currency": acc.currency, "type": acc.type} for acc in accounts]
+        return [{"id": acc.id, "name": acc.name, "slug": acc.slug, "balance": acc.balance, "currency": acc.currency, "type": acc.type, "owner_user_id": acc.owner_user_id} for acc in accounts]
     finally:
         db.close()
 
@@ -480,7 +480,7 @@ async def get_savings_goals(workspace_id: str = "workspace_coloc_taha_mohamed"):
     db = SessionLocal()
     try:
         goals = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id).all()
-        return [{"id": g.id, "name": g.name, "target": g.target, "current": g.current, "target_date": g.target_date} for g in goals]
+        return [{"id": g.id, "name": g.name, "target": g.target, "current": g.current, "target_date": g.target_date, "account_id": g.account_id} for g in goals]
     finally:
         db.close()
 
@@ -600,6 +600,7 @@ async def get_transactions(workspace_id: str = "workspace_coloc_taha_mohamed", l
                 "category_id": t.category_id,
                 "category_name": cat.name if cat else t.category_id,
                 "category_icon": cat.icon if cat else "📝",
+                "account_id": t.account_id,
                 "account_name": acc.name if acc else "Unknown",
                 "account_currency": acc.currency if acc else "MAD",
                 "paid_by_name": usr.name if usr else t.user_id,

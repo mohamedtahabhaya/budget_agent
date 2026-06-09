@@ -168,7 +168,7 @@ def categorize(workspace_id: str, category_name: str) -> str:
                 return c.id
                 
         cat_list = ", ".join([f"{c.name} (ID: {c.id})" for c in categories])
-        llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
+        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0)
         prompt = f"Given the category list: [{cat_list}], which ID best matches: '{category_name}'? Return ONLY the ID (e.g., cat_groceries). If no match, return 'cat_leisure'."
         response = llm.invoke(prompt)
         matched_id = response.content.strip()
@@ -345,7 +345,7 @@ class CreateSavingsGoalSchema(BaseModel):
     target: Union[float, str]
     target_date: str
     category: str = Field(default="General", description="Category of the goal")
-    account_id: Optional[Union[int, str]] = Field(default=None, description="Optional ID of the savings account to link.")
+    account_id: Optional[Union[int, str]] = Field(default=None, description="Optional ID, name, or slug of the savings/personal account to link (e.g. 'mohamed_savings', 'taha_savings', 'Mohamed Savings').")
 
 @tool(args_schema=CreateSavingsGoalSchema)
 def create_savings_goal(workspace_id: str, name: str, target: Union[float, str], target_date: str, category: str = "General", account_id: Optional[Union[int, str]] = None) -> str:
@@ -355,17 +355,52 @@ def create_savings_goal(workspace_id: str, name: str, target: Union[float, str],
             target = float(target.replace(",", ".").replace(" ", "").strip())
         except ValueError:
             return f"Error: target must be a number, got '{target}'"
-    if isinstance(account_id, str):
-        try:
-            account_id = int(account_id.strip()) if account_id.strip() else None
-        except ValueError:
-            account_id = None
+            
     db = SessionLocal()
     try:
-        goal = SavingsGoalModel(workspace_id=workspace_id, name=name, target=target, target_date=target_date, category=category, account_id=account_id)
+        resolved_account_id = None
+        if account_id is not None:
+            account_str = str(account_id).strip()
+            if account_str:
+                # Try parsing as integer first
+                try:
+                    resolved_account_id = int(account_str)
+                except ValueError:
+                    # Look up by slug or exact name
+                    acc = db.query(AccountModel).filter(
+                        AccountModel.workspace_id == workspace_id,
+                        (AccountModel.slug == account_str) | (AccountModel.name.ilike(account_str))
+                    ).first()
+                    if acc:
+                        resolved_account_id = acc.id
+                    else:
+                        # Try partial case-insensitive name match
+                        acc_partial = db.query(AccountModel).filter(
+                            AccountModel.workspace_id == workspace_id,
+                            AccountModel.name.ilike(f"%{account_str}%")
+                        ).first()
+                        if acc_partial:
+                            resolved_account_id = acc_partial.id
+                        else:
+                            return f"Error: Linked account '{account_str}' not found in workspace."
+
+        goal = SavingsGoalModel(
+            workspace_id=workspace_id,
+            name=name,
+            target=target,
+            target_date=target_date,
+            category=category,
+            account_id=resolved_account_id
+        )
         db.add(goal)
         db.commit()
-        return f"Goal '{name}' created: {target} MAD by {target_date}."
+        
+        linked_info = ""
+        if resolved_account_id:
+            linked_acc = db.query(AccountModel).filter(AccountModel.id == resolved_account_id).first()
+            if linked_acc:
+                linked_info = f" (linked to account '{linked_acc.name}')"
+        return f"Goal '{name}' created: {target} MAD by {target_date}{linked_info}."
     finally:
         db.close()
 
@@ -430,10 +465,15 @@ def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: O
             AccountModel.type == "personal"
         ).with_for_update().first()
         
-        savings_account = db.query(AccountModel).filter(
-            AccountModel.workspace_id == workspace_id,
-            AccountModel.slug == "emergency_fund"
-        ).with_for_update().first()
+        if goal.account_id:
+            savings_account = db.query(AccountModel).filter(
+                AccountModel.id == goal.account_id
+            ).with_for_update().first()
+        else:
+            savings_account = db.query(AccountModel).filter(
+                AccountModel.workspace_id == workspace_id,
+                AccountModel.slug == "emergency_fund"
+            ).with_for_update().first()
         
         if not savings_account:
             return "Error: Emergency Fund savings account ('emergency_fund') not found in this workspace."
@@ -923,12 +963,20 @@ def create_recurring_transaction(workspace_id: str, name: str, amount: Union[flo
         )
         db.add(new_rec)
         db.commit()
-        return f"Success: Recurring transaction '{name}' scheduled. First occurrence: {start_date} ({frequency})."
+        db.close()
+        
+        process_res = ""
+        try:
+            from finance_tools import process_recurring_transactions
+            process_res = "\n" + process_recurring_transactions.invoke({"workspace_id": workspace_id})
+        except Exception as pe:
+            process_res = f"\n(Auto-processing warning: {str(pe)})"
+            
+        return f"Success: Recurring transaction '{name}' scheduled. First occurrence: {start_date} ({frequency}).{process_res}"
     except Exception as e:
         db.rollback()
-        return f"Error: {str(e)}"
-    finally:
         db.close()
+        return f"Error: {str(e)}"
 
 class ListRecurringTransactionsSchema(BaseModel):
     workspace_id: str = Field(..., description="The ID of the workspace.")

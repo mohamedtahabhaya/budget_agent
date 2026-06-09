@@ -15,7 +15,7 @@ from datetime import datetime
 from langchain_groq import ChatGroq
 import time
 
-llm = ChatGroq(model="openai/gpt-oss-120b", streaming=True)
+llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", streaming=True)
 
 tool_node = ToolNode(tools=budget_tools) 
 memory = MemorySaver()
@@ -67,7 +67,36 @@ def create_agent(llm, tools, system_prompt, agent_name):
     def agent_node(state: AgentState):
         workspace = state.get("workspace_id", "default_workspace")
         user = state.get("user_id", "default_user")
-        context_prompt = f"{system_prompt}\n\nCURRENT CONTEXT:\n- Workspace ID: {workspace}\n- User ID (The person talking to you): {user}\n- Today's Date: {datetime.now().strftime('%Y-%m-%d')}"
+        
+        # Query users and accounts dynamically for context
+        from database import SessionLocal, UserModel, AccountModel
+        db = SessionLocal()
+        users_context = "Workspace Users:\n"
+        accounts_context = "Workspace Accounts:\n"
+        try:
+            users = db.query(UserModel).filter(UserModel.workspace_id == workspace).all()
+            accounts = db.query(AccountModel).filter(AccountModel.workspace_id == workspace, AccountModel.is_archived == False).all()
+            for u in users:
+                is_talking = " (The person talking to you)" if u.id == user else ""
+                users_context += f"- User ID: '{u.id}' | Name: '{u.name}'{is_talking}\n"
+            for a in accounts:
+                owner_info = f" | Owner User ID: '{a.owner_user_id}'" if a.owner_user_id else " (Shared/Joint)"
+                accounts_context += f"- Slug: '{a.slug}' | Name: '{a.name}' | Type: '{a.type}'{owner_info}\n"
+        except Exception as e:
+            users_context += f"Error: {e}\n"
+            accounts_context += f"Error: {e}\n"
+        finally:
+            db.close()
+            
+        context_prompt = (
+            f"{system_prompt}\n\n"
+            f"CURRENT CONTEXT:\n"
+            f"- Workspace ID: {workspace}\n"
+            f"- User ID: {user}\n"
+            f"- Today's Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+            f"{users_context}\n"
+            f"{accounts_context}"
+        )
             
         pruned_history = prune_messages(state["messages"])
         messages_for_llm = [SystemMessage(content=context_prompt)] + pruned_history
@@ -79,16 +108,25 @@ def create_agent(llm, tools, system_prompt, agent_name):
 data_prompt = """You are the Data Entry Expert. 
 Your role is to MODIFY the database: create transactions, handle transfers, manage savings goals, schedule recurring transactions, import bank CSV statements, manage workspace invitations, create accounts, rename accounts, archive accounts, update workspace settings, modify split rules, and create or update budget limits (using 'update_budget_limit').
 
-CRITICAL ACCOUNT MAPPING & USERS:
-- If 'Taha' is mentioned, Taha speaks, Taha paid, or Taha transfers, you MUST use `account_slug: 'taha_personal'` and `paid_by: 'user_taha'`. Do NOT default to 'main_current' when Taha is involved.
-- If 'Mohamed' is mentioned, Mohamed speaks, Mohamed paid, or Mohamed transfers, you MUST use `account_slug: 'main_current'` and `paid_by: 'user_mohamed'`.
-- "Joint Account", "Shared", or "Household" -> Use slug: 'joint_current' (MANDATORY).
-- "Emergency Fund" or "Emergency account" -> Use slug: 'emergency_fund' (shared savings account).
+CRITICAL USER & ACCOUNT MAPPING:
+- Use the dynamically provided list of "Workspace Users" and "Workspace Accounts" under CURRENT CONTEXT to identify the correct owners, slugs, and user IDs. Do NOT assume names or slugs other than what is in the list.
+- When a user's name is mentioned, matches, or they are speaking, you MUST:
+  - Map them to the correct User ID from the Workspace Users list.
+  - Map the transaction or savings goal to that user's personal checking/current (type: 'personal') or savings (type: 'savings') account slug from the Workspace Accounts list.
+- "Joint Account", "Shared", or "Household" -> Use the account with type 'shared_current' (typically slug 'joint_current').
+- "Emergency Fund" or "Emergency account" -> Use the account with type 'shared_savings' (typically slug 'emergency_fund').
+- CURRENCY & UNITS:
+  - Treat "dhs", "dh", or "dirham" (case-insensitive) as Moroccan Dirham (MAD) by default. Do NOT assume UAE Dirham (AED) or refuse the request.
+- SAVINGS GOALS: When creating a savings goal, if the user specifies linking it to their personal account or savings account (e.g., "my personal account", "my savings", "Mohamed Savings"), you MUST link it to their personal savings account (type: 'savings', e.g., 'mohamed_savings' or 'taha_savings'), NOT their checking/current account (type: 'personal'). Pass this resolved savings account's slug to the `account_id` parameter of `create_savings_goal`.
 
 WORKFLOWS:
 1. NEW EXPENSE: 'categorize' -> 'create_transaction' -> 'get_balances'.
 2. TRANSFER: 'transfer' -> 'get_balances'.
-3. SAVINGS: 'create_savings_goal' to make a new savings goal target, 'update_savings_goal' to add/deposit money to it, 'delete_savings_goal' to cancel/delete a goal, and 'update_savings_goal_properties' to edit/modify an existing goal's details.
+3. SAVINGS (Choose ONLY the single tool that matches the user's specific request):
+   - To make/create a new savings goal -> Call 'create_savings_goal'.
+   - To add/deposit/withdraw money from a goal -> Call 'update_savings_goal'.
+   - To cancel/delete a goal -> Call 'delete_savings_goal'.
+   - To edit/modify a goal's properties (name/target/date) -> Call 'update_savings_goal_properties'.
 4. RECURRING/SUBSCRIPTION: 'create_recurring_transaction' to schedule a weekly or monthly subscription/transaction. Use 'delete_recurring_transaction' to cancel/delete a scheduled recurring transaction by ID.
 5. BANK IMPORT: 'import_bank_csv' to parse CSV statements (Attijariwafa, BMCE, SG) and load them into the database.
 6. PROCESS RECURRING: 'process_recurring_transactions' to trigger pending occurrences.

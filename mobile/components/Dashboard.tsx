@@ -41,6 +41,7 @@ export default function Dashboard({
   const [selectedTx, setSelectedTx] = useState<any | null>(null);
   const [showBreakdownModal, setShowBreakdownModal] = useState(false);
   const [showEarningsModal, setShowEarningsModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'all' | 'personal' | 'shared'>('all');
 
   const EXCHANGE_RATES: Record<string, number> = {
     MAD: 1,
@@ -137,10 +138,53 @@ export default function Dashboard({
   }
 
   // Calculate totals in the selected display currency
-  const totalBalanceConverted = accounts.reduce((sum, a) => {
+  // 1. Privacy Filter: Only show accounts belonging to active user or shared
+  const allowedAccounts = accounts.filter(a => 
+    a.type.includes('shared') || 
+    a.owner_user_id === userId || 
+    !a.owner_user_id
+  );
+
+  // 2. View Mode Filter: personal / shared / all
+  const filteredAccounts = allowedAccounts.filter(a => {
+    if (viewMode === 'personal') {
+      return a.owner_user_id === userId && !a.type.includes('shared');
+    } else if (viewMode === 'shared') {
+      return a.type.includes('shared') || !a.owner_user_id;
+    }
+    return true; // 'all'
+  });
+
+  // Calculate totals in the selected display currency for filtered accounts
+  const totalBalanceConverted = filteredAccounts.reduce((sum, a) => {
     const converted = convertAmount(a.balance, a.currency || 'MAD', displayCurrency);
     return sum + converted;
   }, 0);
+
+  // Filter transactions based on visible accounts
+  const filteredTransactions = transactions.filter(t => {
+    const acc = allowedAccounts.find(a => a.name === t.account_name || a.id === t.account_id);
+    if (!acc) return false;
+    return filteredAccounts.some(fa => fa.id === acc.id);
+  });
+
+  // Filter savings goals based on visible accounts and user permissions
+  const visibleGoals = goals.filter(g => {
+    // If the goal is linked to an account, we must check if that account is allowed for this user
+    if (g.account_id) {
+      const isAllowed = allowedAccounts.some(a => a.id === g.account_id);
+      if (!isAllowed) return false;
+    }
+
+    if (viewMode === 'personal') {
+      if (!g.account_id) return false; // Hide unlinked/shared goals in personal view
+      return filteredAccounts.some(a => a.id === g.account_id);
+    } else if (viewMode === 'shared') {
+      if (!g.account_id) return true; // Show unlinked/shared goals in joint view
+      return filteredAccounts.some(a => a.id === g.account_id);
+    }
+    return true; // Show all in 'all' mode
+  });
 
   const getGreetingName = () => {
     return userId === 'user_mohamed' ? 'Mohamed' : 'Taha';
@@ -154,14 +198,14 @@ export default function Dashboard({
   const currentMonthStr = new Date().toISOString().slice(0, 7); // e.g. "2026-06"
   let targetMonthStr = currentMonthStr;
   
-  const hasCurrentMonthTxs = transactions.some(t => 
+  const hasCurrentMonthTxs = filteredTransactions.some(t => 
     t.date && t.date.startsWith(currentMonthStr) && 
-    t.amount > 0 && isNotSavings(t)
+    t.amount > 0
   );
   
-  if (!hasCurrentMonthTxs && transactions.length > 0) {
-    const validDates = transactions
-      .filter(t => t.date && t.amount > 0 && isNotSavings(t))
+  if (!hasCurrentMonthTxs && filteredTransactions.length > 0) {
+    const validDates = filteredTransactions
+      .filter(t => t.date && t.amount > 0)
       .map(t => t.date);
     if (validDates.length > 0) {
       targetMonthStr = validDates[0].slice(0, 7); // Sorted desc, so first is latest
@@ -174,9 +218,8 @@ export default function Dashboard({
     return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
   };
 
-  const expenseTransactions = transactions.filter(t => 
+  const expenseTransactions = filteredTransactions.filter(t => 
     t.amount > 0 && 
-    isNotSavings(t) && 
     t.date && 
     t.date.startsWith(targetMonthStr)
   );
@@ -207,9 +250,8 @@ export default function Dashboard({
   };
 
   // Earnings/Gains Calculations (Target Month)
-  const earningTransactions = transactions.filter(t => 
+  const earningTransactions = filteredTransactions.filter(t => 
     t.amount < 0 && 
-    isNotSavings(t) && 
     t.date && 
     t.date.startsWith(targetMonthStr)
   );
@@ -281,6 +323,31 @@ export default function Dashboard({
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* VIEW MODE SWITCHER ROW */}
+        <View style={[styles.currencySwitcher, { marginTop: 10 }]}>
+          {[
+            { key: 'all', label: '🌐 All' },
+            { key: 'personal', label: '👤 Personal' },
+            { key: 'shared', label: '👥 Joint' }
+          ].map(mode => (
+            <TouchableOpacity
+              key={mode.key}
+              style={[
+                styles.currencyBtn,
+                viewMode === mode.key && styles.currencyBtnActive
+              ]}
+              onPress={() => setViewMode(mode.key as any)}
+            >
+              <Text style={[
+                styles.currencyBtnText,
+                viewMode === mode.key && styles.currencyBtnTextActive
+              ]}>
+                {mode.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
 
@@ -288,7 +355,7 @@ export default function Dashboard({
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>💳 Accounts & Balances</Text>
         <View style={styles.accountsGrid}>
-          {accounts.map((a, i) => {
+          {filteredAccounts.map((a, i) => {
             // Highlight current user's personal account
             const isPersonal = a.owner_user_id === userId;
             return (
@@ -311,7 +378,7 @@ export default function Dashboard({
               </View>
             );
           })}
-          {accounts.length === 0 && (
+          {filteredAccounts.length === 0 && (
             <Text style={styles.emptyText}>No accounts registered.</Text>
           )}
         </View>
@@ -693,7 +760,7 @@ export default function Dashboard({
       })()}
 
       {/* SHARED EXPENSES SPLIT CONTRIBUTIONS */}
-      {totalShared > 0 && (
+      {viewMode !== 'personal' && totalShared > 0 && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>⚖️ Shared Expense Contributions</Text>
           <View style={COMMON_STYLES.card}>
@@ -725,7 +792,7 @@ export default function Dashboard({
       {/* SAVINGS GOALS SECTION */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>🎯 Savings Goals</Text>
-        {goals.map((g, i) => {
+        {visibleGoals.map((g, i) => {
           const progress = g.target > 0 ? g.current / g.target : 0;
           const pct = Math.min(Math.round(progress * 100), 100);
           const convertedCurrent = convertAmount(g.current, 'MAD', displayCurrency);
@@ -745,7 +812,7 @@ export default function Dashboard({
             </View>
           );
         })}
-        {goals.length === 0 && (
+        {visibleGoals.length === 0 && (
           <View style={COMMON_STYLES.card}>
             <Text style={styles.emptyText}>No savings goals registered.</Text>
           </View>
@@ -755,7 +822,7 @@ export default function Dashboard({
       {/* RECENT TRANSACTIONS SECTION */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>💸 Recent Transactions</Text>
-        {transactions.slice(0, 6).map((tx, i) => {
+        {filteredTransactions.slice(0, 6).map((tx, i) => {
           const isExpense = tx.amount > 0;
           const convertedTxAmount = convertAmount(Math.abs(tx.amount), tx.account_currency || 'MAD', displayCurrency);
           return (
@@ -783,7 +850,7 @@ export default function Dashboard({
             </TouchableOpacity>
           );
         })}
-        {transactions.length === 0 && (
+        {filteredTransactions.length === 0 && (
           <Text style={styles.emptyText}>No transactions recorded yet.</Text>
         )}
       </View>
