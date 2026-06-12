@@ -17,7 +17,7 @@ if not DATABASE_URL:
         "e.g., DATABASE_URL=postgresql://postgres:postgrespassword@localhost:5433/budget_db"
     )
 
-# SQLite connection args are specific to SQLite and should not be passed to PostgreSQL
+# SQLite connection args
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 else:

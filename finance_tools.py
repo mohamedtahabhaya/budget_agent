@@ -21,7 +21,9 @@ class ListAccountsSchema(BaseModel):
 @tool(args_schema=ListAccountsSchema)
 def list_accounts(workspace_id: str, show_archived: Optional[Union[bool, str]] = False) -> str:
     """List all accounts and balances for a workspace."""
+    # Tool: list accounts
     def parse_bool(val):
+        # Tool: parse bool
         if val is None: return False
         if isinstance(val, bool): return val
         return val.lower().strip() in ["true", "1", "yes", "on"]
@@ -47,11 +49,13 @@ def list_accounts(workspace_id: str, show_archived: Optional[Union[bool, str]] =
 @tool
 def get_balances(workspace_id: str) -> str:
     """Get the absolute latest balances from the database. Use this to confirm truth."""
+    # Tool: get balances
     return list_accounts.invoke({"workspace_id": workspace_id})
 
 @tool
 def list_members(workspace_id: str) -> str:
     """Get the list of all members (users) in the workspace and their IDs (e.g. user_mohamed)."""
+    # Tool: list members
     db = SessionLocal()
     try:
         users = db.query(UserModel).filter(UserModel.workspace_id == workspace_id).all()
@@ -66,6 +70,7 @@ class ListTransactionsSchema(BaseModel):
 @tool(args_schema=ListTransactionsSchema)
 def list_recent_transactions(account_slug: str, limit: int = 5) -> str:
     """List the most recent transactions for an account to find IDs for correction."""
+    # Tool: list recent transactions
     db = SessionLocal()
     try:
         account = db.query(AccountModel).filter(AccountModel.slug == account_slug).first()
@@ -92,6 +97,7 @@ class DeleteTransactionSchema(BaseModel):
 @tool(args_schema=DeleteTransactionSchema)
 def delete_transaction(transaction_id: Union[int, str]) -> str:
     """Delete a transaction by its ID and restore the account balance."""
+    # Tool: delete transaction
     db = SessionLocal()
     try:
         try:
@@ -123,6 +129,7 @@ class CategorizeSchema(BaseModel):
 @tool(args_schema=CategorizeSchema)
 def categorize(workspace_id: str, category_name: str) -> str:
     """Map a raw category name or description to a valid database category ID."""
+    # Tool: categorize
     db = SessionLocal()
     try:
         categories = db.query(CategoryModel).filter(CategoryModel.workspace_id == workspace_id).all()
@@ -189,6 +196,7 @@ class CheckBudgetSchema(BaseModel):
 @tool(args_schema=CheckBudgetSchema)
 def check_budget(workspace_id: str, category_id: str, date: Optional[str] = None, account_slug: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """Check budget for a specific category and month. Respects workspace, user, and account scopes."""
+    # Tool: check budget
     db = SessionLocal()
     try:
         rules = db.query(BudgetRuleModel).filter(BudgetRuleModel.category_id == category_id).all()
@@ -255,6 +263,7 @@ def create_transaction(
     currency: Optional[str] = None
 ) -> str:
     """Record a transaction. Use POSITIVE for expenses, NEGATIVE for income/wins."""
+    # Tool: create transaction
     # Coerce parameters to correct types robustly
     if isinstance(amount, str):
         try:
@@ -350,6 +359,7 @@ class CreateSavingsGoalSchema(BaseModel):
 @tool(args_schema=CreateSavingsGoalSchema)
 def create_savings_goal(workspace_id: str, name: str, target: Union[float, str], target_date: str, category: str = "General", account_id: Optional[Union[int, str]] = None) -> str:
     """Create a new savings goal bucket. target MUST be a number."""
+    # Tool: create savings goal
     if isinstance(target, str):
         try:
             target = float(target.replace(",", ".").replace(" ", "").strip())
@@ -407,6 +417,7 @@ def create_savings_goal(workspace_id: str, name: str, target: Union[float, str],
 @tool
 def list_savings_goals(workspace_id: str) -> str:
     """List all savings goals and their progress."""
+    # Tool: list savings goals
     db = SessionLocal()
     try:
         goals = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id).all()
@@ -429,6 +440,7 @@ class UpdateSavingsGoalSchema(BaseModel):
 @tool(args_schema=UpdateSavingsGoalSchema)
 def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None, initiated_by: str = "user_mohamed") -> str:
     """Add or withdraw money from a savings goal by ID or name, executing a real database transfer between the member's personal account and the Emergency Fund."""
+    # Tool: update savings goal
     if isinstance(amount, str):
         try:
             amount = float(amount.replace(",", ".").replace(" ", "").strip())
@@ -542,6 +554,7 @@ def update_savings_goal(workspace_id: str, amount: Union[float, str], goal_id: O
 @tool
 def compute_split(workspace_id: str) -> str:
     """Calculate who owes what based on shared expenses and split rule."""
+    # Tool: compute split
     db = SessionLocal()
     try:
         ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
@@ -690,6 +703,7 @@ def compute_split(workspace_id: str) -> str:
 @tool
 def generate_report(workspace_id: str, month: Optional[str] = None) -> str:
     """Produce a comprehensive financial report (spend by category, member, savings, split)."""
+    # Tool: generate report
     db = SessionLocal()
     try:
         target_month = month or datetime.now().strftime("%Y-%m")
@@ -768,6 +782,7 @@ class TranscribeAudioSchema(BaseModel):
 @tool(args_schema=TranscribeAudioSchema)
 def transcribe_audio(audio_file_path: str) -> str:
     """Speech-to-text on a voice note; returns the transcript."""
+    # Tool: transcribe audio
     try:
         client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         with open(audio_file_path, "rb") as audio_file:
@@ -785,6 +800,7 @@ class ParseReceiptSchema(BaseModel):
 @tool(args_schema=ParseReceiptSchema)
 def parse_receipt_image(base64_image: str) -> str:
     """Vision call: extract merchant, total, date, line items from a receipt photo."""
+    # Tool: parse receipt image
     try:
         vision_llm = ChatGroq(model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
         
@@ -829,6 +845,7 @@ class TransferSchema(BaseModel):
 @tool(args_schema=TransferSchema)
 def transfer(source_slug: str, dest_slug: str, amount: Union[float, str], initiated_by: str = "user_mohamed") -> str:
     """Move money between any two accounts within the workspace. Logs transaction history."""
+    # Tool: transfer
     if isinstance(amount, str):
         try:
             amount = float(amount.replace(",", ".").replace(" ", "").strip())
@@ -883,6 +900,7 @@ def transfer(source_slug: str, dest_slug: str, amount: Union[float, str], initia
         db.close()
 
 def parse_moroccan_date(date_str: str) -> str:
+    # Tool: parse moroccan date
     date_str = date_str.strip()
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%y"):
         try:
@@ -893,6 +911,7 @@ def parse_moroccan_date(date_str: str) -> str:
     return date_str
 
 def detect_bank_and_delimiter(lines: List[str]) -> tuple:
+    # Tool: detect bank and delimiter
     for i, line in enumerate(lines[:5]):
         line_lower = line.lower()
         if "date d'opération" in line_lower and "libellé" in line_lower and "montant" in line_lower:
@@ -910,6 +929,7 @@ def detect_bank_and_delimiter(lines: List[str]) -> tuple:
     return "BMCE", ",", lines
 
 def read_csv_file(file_path: str) -> str:
+    # Tool: read csv file
     for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
         try:
             with open(file_path, "r", encoding=encoding) as f:
@@ -930,6 +950,7 @@ class CreateRecurringTransactionSchema(BaseModel):
 @tool(args_schema=CreateRecurringTransactionSchema)
 def create_recurring_transaction(workspace_id: str, name: str, amount: Union[float, str], category_id: str, account_slug: str, frequency: str, start_date: str) -> str:
     """Schedule a recurring weekly or monthly subscription/transaction."""
+    # Tool: create recurring transaction
     if isinstance(amount, str):
         try:
             amount = float(amount.replace(",", ".").replace(" ", "").strip())
@@ -984,6 +1005,7 @@ class ListRecurringTransactionsSchema(BaseModel):
 @tool(args_schema=ListRecurringTransactionsSchema)
 def list_recurring_transactions(workspace_id: str) -> str:
     """List all scheduled recurring transactions."""
+    # Tool: list recurring transactions
     db = SessionLocal()
     try:
         recs = db.query(RecurringTransactionModel).filter(RecurringTransactionModel.workspace_id == workspace_id).all()
@@ -1008,6 +1030,7 @@ class ProcessRecurringTransactionsSchema(BaseModel):
 @tool(args_schema=ProcessRecurringTransactionsSchema)
 def process_recurring_transactions(workspace_id: Optional[str] = None) -> str:
     """Process any pending occurrences of recurring transactions and update their next dates."""
+    # Tool: process recurring transactions
     db = SessionLocal()
     try:
         query = db.query(RecurringTransactionModel).filter(
@@ -1083,6 +1106,7 @@ class ImportBankCSVSchema(BaseModel):
 @tool(args_schema=ImportBankCSVSchema)
 def import_bank_csv(file_path: str, account_slug: str, workspace_id: str, bank_name: Optional[str] = None) -> str:
     """Import transactions from a Moroccan bank CSV statement (Attijariwafa, BMCE, SG)."""
+    # Tool: import bank csv
     db = SessionLocal()
     try:
         content = read_csv_file(file_path)
@@ -1209,6 +1233,7 @@ class ListNotificationsSchema(BaseModel):
 @tool(args_schema=ListNotificationsSchema)
 def list_notifications(workspace_id: str, limit: int = 10) -> str:
     """List unread or recent notifications/warnings for a workspace."""
+    # Tool: list notifications
     db = SessionLocal()
     try:
         notifs = db.query(NotificationModel).filter(
@@ -1237,6 +1262,7 @@ class DeleteRecurringTransactionSchema(BaseModel):
 @tool(args_schema=DeleteRecurringTransactionSchema)
 def delete_recurring_transaction(recurring_transaction_id: Union[int, str]) -> str:
     """Delete or cancel a scheduled recurring transaction by its ID."""
+    # Tool: delete recurring transaction
     db = SessionLocal()
     try:
         try:
@@ -1268,6 +1294,7 @@ class CreateWorkspaceInviteSchema(BaseModel):
 @tool(args_schema=CreateWorkspaceInviteSchema)
 def create_workspace_invite(workspace_id: str, email: str, name: str, role: str = "member", income_mad: Union[float, str] = 0.0) -> str:
     """Create a workspace invitation for a new member, generating a unique registration/join token link."""
+    # Tool: create workspace invite
     if isinstance(income_mad, str):
         try:
             income_mad = float(income_mad.replace(",", ".").replace(" ", "").strip())
@@ -1308,6 +1335,7 @@ class ListInvitationsSchema(BaseModel):
 @tool(args_schema=ListInvitationsSchema)
 def list_invitations(workspace_id: str) -> str:
     """List all workspace invitations (both pending and accepted)."""
+    # Tool: list invitations
     db = SessionLocal()
     try:
         invites = db.query(InvitationModel).filter(InvitationModel.workspace_id == workspace_id).all()
@@ -1330,6 +1358,7 @@ class GetNotificationPreferencesSchema(BaseModel):
 @tool(args_schema=GetNotificationPreferencesSchema)
 def get_notification_preferences(user_id: str) -> str:
     """Retrieve the notification preferences for a specific user."""
+    # Tool: get notification preferences
     from database import NotificationPreferenceModel
     db = SessionLocal()
     try:
@@ -1369,7 +1398,9 @@ def update_notification_preferences(
     browser_push_enabled: Optional[Union[bool, str]] = None
 ) -> str:
     """Update notification preferences for a specific user."""
+    # Tool: update notification preferences
     def parse_bool(val):
+        # Tool: parse bool
         if val is None: return None
         if isinstance(val, bool): return val
         return val.lower().strip() in ["true", "1", "yes", "on"]
@@ -1422,6 +1453,7 @@ class DeleteSavingsGoalSchema(BaseModel):
 @tool(args_schema=DeleteSavingsGoalSchema)
 def delete_savings_goal(workspace_id: str, goal_id: Optional[Union[int, str]] = None, goal_name: Optional[str] = None) -> str:
     """Delete a savings goal entirely from the database by ID or name."""
+    # Tool: delete savings goal
     db = SessionLocal()
     try:
         query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
@@ -1473,6 +1505,7 @@ def update_savings_goal_properties(
     new_category: Optional[str] = None
 ) -> str:
     """Modify details of an existing savings goal (like changing its target date, name, target amount, or category) by ID or name."""
+    # Tool: update savings goal properties
     db = SessionLocal()
     try:
         query = db.query(SavingsGoalModel).filter(SavingsGoalModel.workspace_id == workspace_id)
@@ -1546,6 +1579,7 @@ def create_account(
     balance: Optional[Union[float, str]] = 0.0
 ) -> str:
     """Create a new financial account in the workspace with a unique slug."""
+    # Tool: create account
     db = SessionLocal()
     try:
         if balance is not None:
@@ -1592,6 +1626,7 @@ class RenameAccountSchema(BaseModel):
 @tool(args_schema=RenameAccountSchema)
 def rename_account(workspace_id: str, slug: str, new_name: str) -> str:
     """Rename an existing account and update its slug accordingly (preserving references)."""
+    # Tool: rename account
     db = SessionLocal()
     try:
         acc = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.slug == slug).first()
@@ -1632,6 +1667,7 @@ class ArchiveAccountSchema(BaseModel):
 @tool(args_schema=ArchiveAccountSchema)
 def archive_account(workspace_id: str, slug: str) -> str:
     """Archive an account so that it is hidden from listings but its historical transactions remain preserved."""
+    # Tool: archive account
     db = SessionLocal()
     try:
         acc = db.query(AccountModel).filter(AccountModel.workspace_id == workspace_id, AccountModel.slug == slug).first()
@@ -1655,6 +1691,7 @@ class UpdateWorkspaceSettingsSchema(BaseModel):
 @tool(args_schema=UpdateWorkspaceSettingsSchema)
 def update_workspace_settings(workspace_id: str, name: Optional[str] = None, currency: Optional[str] = None) -> str:
     """Update general settings of the active workspace, such as its name or default currency."""
+    # Tool: update workspace settings
     db = SessionLocal()
     try:
         ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
@@ -1690,6 +1727,7 @@ class UpdateSplitRulesSchema(BaseModel):
 @tool(args_schema=UpdateSplitRulesSchema)
 def update_split_rules(workspace_id: str, split_rule: str, custom_percentages: Optional[dict] = None) -> str:
     """Update split rule mode (equal, proportional, or custom) and custom percentages mapping in the database."""
+    # Tool: update split rules
     import json
     split_rule = split_rule.lower().strip()
     if split_rule not in ["equal", "proportional", "custom"]:
@@ -1741,6 +1779,7 @@ class GetWorkspaceSettingsSchema(BaseModel):
 @tool(args_schema=GetWorkspaceSettingsSchema)
 def get_workspace_settings(workspace_id: str) -> str:
     """Retrieve settings for the workspace including name, default currency, and split rule."""
+    # Tool: get workspace settings
     db = SessionLocal()
     try:
         ws = db.query(WorkspaceModel).filter(WorkspaceModel.id == workspace_id).first()
@@ -1762,6 +1801,7 @@ class UpdateBudgetLimitSchema(BaseModel):
 @tool(args_schema=UpdateBudgetLimitSchema)
 def update_budget_limit(category_id: str, monthly_cap: Union[float, str], scope_type: str = "workspace") -> str:
     """Create or update a budget limit rule for a category in the database."""
+    # Tool: update budget limit
     category_id = category_id.lower().strip()
     scope_type = scope_type.lower().strip()
     if scope_type not in ["workspace", "user", "account"]:

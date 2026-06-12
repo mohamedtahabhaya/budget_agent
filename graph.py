@@ -24,26 +24,25 @@ def prune_messages(messages, max_messages=12):
     if len(messages) <= max_messages:
         return messages
     
-    # Take the last max_messages
+    # Keep last messages
     pruned = messages[-max_messages:]
     
-    # We must ensure we start with a HumanMessage so the conversation history makes sense to the LLM
-    # and we do not start with a ToolMessage without its preceding AIMessage with tool_calls.
+    # Ensure history starts with human message
     while pruned and getattr(pruned[0], "type", "") != "human":
         pruned = pruned[1:]
         
     if not pruned:
-        # Fallback to last 6 messages if everything got pruned
+        # Fallback if too many pruned
         return messages[-6:]
         
     return pruned
 
 def invoke_llm_with_retry(model, messages, max_retries=3, initial_delay=1.0):
+    # LLM request invocation with retry logic
     delay = initial_delay
     for attempt in range(max_retries):
         try:
-            # Add a small delay between consecutive LLM steps inside the graph
-            # to prevent hitting Groq's low TPM/RPM limit
+            # Prevent API rate limits
             time.sleep(0.5)
             return model.invoke(messages)
         except Exception as e:
@@ -58,7 +57,7 @@ def invoke_llm_with_retry(model, messages, max_retries=3, initial_delay=1.0):
     return model.invoke(messages)
 
 def create_agent(llm, tools, system_prompt, agent_name):
-    """Fonction usine pour créer nos experts financiers."""
+    """Create an agent node."""
     if tools:
         llm_with_tools = llm.bind_tools(tools)
     else:
@@ -68,7 +67,7 @@ def create_agent(llm, tools, system_prompt, agent_name):
         workspace = state.get("workspace_id", "default_workspace")
         user = state.get("user_id", "default_user")
         
-        # Query users and accounts dynamically for context
+        # Get dynamic workspace context
         from database import SessionLocal, UserModel, AccountModel
         db = SessionLocal()
         users_context = "Workspace Users:\n"
@@ -182,6 +181,7 @@ class SupervisorResponse(BaseModel):
     next_agent: Literal["data_agent", "analyst_agent", "general_agent", "FINISH"]
 
 def supervisor_node(state: AgentState):
+    # Supervisor routing node
     print("[SUPERVISOR] Routing...")
     
     cleaned_messages = []
@@ -207,7 +207,7 @@ def supervisor_node(state: AgentState):
     pruned_history = prune_messages(cleaned_messages)
     messages_for_llm = [SystemMessage(content=supervisor_prompt)] + pruned_history
     
-    # We invoke the LLM directly without structured output to bypass tool calling / API validation bugs on Groq
+    # Direct call for routing stability
     try:
         res = invoke_llm_with_retry(llm, messages_for_llm)
         content = res.content.lower().strip()
@@ -215,7 +215,7 @@ def supervisor_node(state: AgentState):
         print(f"[SUPERVISOR ERROR] API invocation failed: {e}")
         content = ""
         
-    # Standard fallback parsing
+    # Parse decision from LLM response
     if "data_agent" in content or "data-agent" in content:
         decision = "data_agent"
     elif "analyst_agent" in content or "analyst-agent" in content:
@@ -225,8 +225,7 @@ def supervisor_node(state: AgentState):
     elif "finish" in content:
         decision = "FINISH"
     else:
-        # Fallback to heuristics based on the USER message content directly
-        # since the model response did not contain a clear routing token or was empty/conversational
+        # Fallback parser if decision is ambiguous
         user_msg = ""
         if state["messages"]:
             last_msg = state["messages"][-1]
@@ -277,18 +276,21 @@ def supervisor_node(state: AgentState):
     return {"next_agent": decision, "sender": "supervisor"}
 
 def route_after_supervisor(state: AgentState):
+    # Route to next active agent
     decision = state["next_agent"]
     if decision == "FINISH":
         return END
     return decision
 
 def route_after_agent(state: AgentState):
+    # Route agent output to tools or supervisor
     last_message = state["messages"][-1]
     if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
     return "supervisor"
 
 def route_after_tools(state: AgentState):
+    # Resume sender agent node
     return state["sender"]
 
 

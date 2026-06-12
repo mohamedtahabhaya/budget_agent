@@ -13,9 +13,11 @@ import { THEMES, getCommonStyles, ThemeType } from './Theme';
 export default function Notifications({
   userId,
   theme,
+  activeTab
 }: {
   userId: string;
   theme: ThemeType;
+  activeTab: string;
 }) {
   const colors = THEMES[theme];
   const commonStyles = getCommonStyles(colors);
@@ -44,8 +46,10 @@ export default function Notifications({
   };
 
   useEffect(() => {
-    fetchNotifications();
-  }, [userId]);
+    if (activeTab === 'notifications') {
+      fetchNotifications();
+    }
+  }, [userId, activeTab]);
 
   const onRefresh = () => {
     setRefreshing(true);

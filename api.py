@@ -11,6 +11,7 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def startup_event():
+    # Run server startup tasks
     print("[STARTUP] Processing recurring transactions...")
     try:
         res = process_recurring_transactions.invoke({"workspace_id": "workspace_coloc_taha_mohamed"})
@@ -20,11 +21,13 @@ async def startup_event():
 
 @app.get("/", response_class=HTMLResponse)
 async def read_index():
+    # Serve main web page
     with open("index.html", "r", encoding="utf-8") as f:
         return f.read()
 
 @app.get("/invite/accept", response_class=HTMLResponse)
 async def accept_invite(token: str):
+    # Accept and process member invite
     from database import SessionLocal, InvitationModel, UserModel, WorkspaceModel
     db = SessionLocal()
     try:
@@ -278,6 +281,7 @@ class UpdatePreferencesRequest(BaseModel):
 
 @app.get("/preferences/{user_id}")
 async def get_user_preferences(user_id: str):
+    # Retrieve user notification settings
     from database import SessionLocal, NotificationPreferenceModel, UserModel
     db = SessionLocal()
     try:
@@ -303,6 +307,7 @@ async def get_user_preferences(user_id: str):
 
 @app.post("/preferences/{user_id}")
 async def update_user_preferences(user_id: str, request: UpdatePreferencesRequest):
+    # Save user notification settings
     from database import SessionLocal, NotificationPreferenceModel, UserModel
     db = SessionLocal()
     try:
@@ -419,6 +424,7 @@ async def update_workspace_details(workspace_id: str, request: UpdateWorkspaceRe
 
 @app.post("/accounts/create")
 async def create_account_api(request: CreateAccountRequest):
+    # Create new account API endpoint
     from finance_tools import create_account
     try:
         res = create_account.invoke({
@@ -437,6 +443,7 @@ async def create_account_api(request: CreateAccountRequest):
 
 @app.post("/accounts/{slug}/archive")
 async def archive_account_api(slug: str, workspace_id: str = "workspace_coloc_taha_mohamed"):
+    # Archive account API endpoint
     from finance_tools import archive_account
     try:
         res = archive_account.invoke({
@@ -451,6 +458,7 @@ async def archive_account_api(slug: str, workspace_id: str = "workspace_coloc_ta
 
 @app.post("/accounts/{slug}/rename")
 async def rename_account_api(slug: str, request: RenameAccountRequest):
+    # Rename account API endpoint
     from finance_tools import rename_account
     try:
         res = rename_account.invoke({
@@ -466,6 +474,7 @@ async def rename_account_api(slug: str, request: RenameAccountRequest):
 
 @app.get("/accounts")
 async def get_accounts(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    # Fetch active accounts
     from database import SessionLocal, AccountModel
     db = SessionLocal()
     try:
@@ -476,6 +485,7 @@ async def get_accounts(workspace_id: str = "workspace_coloc_taha_mohamed"):
 
 @app.get("/savings-goals")
 async def get_savings_goals(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    # Fetch savings goals
     from database import SessionLocal, SavingsGoalModel
     db = SessionLocal()
     try:
@@ -486,6 +496,7 @@ async def get_savings_goals(workspace_id: str = "workspace_coloc_taha_mohamed"):
 
 @app.get("/notifications")
 async def get_notifications_list(workspace_id: str = "workspace_coloc_taha_mohamed", limit: int = 5):
+    # Fetch alerts feed
     from database import SessionLocal, NotificationModel
     db = SessionLocal()
     try:
@@ -496,6 +507,7 @@ async def get_notifications_list(workspace_id: str = "workspace_coloc_taha_moham
 
 @app.post("/notifications/read")
 async def mark_notifications_read(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    # Mark notification read states
     from database import SessionLocal, NotificationModel
     db = SessionLocal()
     try:
@@ -521,6 +533,7 @@ class UpdateBudgetRequest(BaseModel):
 
 @app.get("/budgets")
 async def get_budgets(workspace_id: str = "workspace_coloc_taha_mohamed"):
+    # Get active budgets limits
     from database import SessionLocal, CategoryModel, BudgetRuleModel
     db = SessionLocal()
     try:
@@ -546,6 +559,7 @@ async def get_budgets(workspace_id: str = "workspace_coloc_taha_mohamed"):
 
 @app.post("/budgets")
 async def update_budget(request: UpdateBudgetRequest):
+    # Create or update budget limits
     from database import SessionLocal, BudgetRuleModel
     db = SessionLocal()
     try:
@@ -577,6 +591,7 @@ async def update_budget(request: UpdateBudgetRequest):
 
 @app.get("/transactions")
 async def get_transactions(workspace_id: str = "workspace_coloc_taha_mohamed", limit: int = 10):
+    # Get recent transaction ledger
     from database import SessionLocal, TransactionModel, AccountModel, CategoryModel, UserModel
     db = SessionLocal()
     try:
@@ -613,6 +628,7 @@ async def get_transactions(workspace_id: str = "workspace_coloc_taha_mohamed", l
 
 @app.delete("/transactions/{transaction_id}")
 async def delete_transaction_api(transaction_id: int):
+    # Delete specific transaction ID
     from finance_tools import delete_transaction
     res = delete_transaction.invoke({"transaction_id": str(transaction_id)})
     if res.startswith("Success:"):
@@ -628,6 +644,7 @@ class ImportCSVRequest(BaseModel):
 
 @app.post("/import-bank-csv")
 async def import_bank_csv_api(request: ImportCSVRequest):
+    # Import uploaded bank CSV statements
     import uuid
     import os
     from finance_tools import import_bank_csv
@@ -682,6 +699,7 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 async def chat_endpoint(request: ChatRequest):
+    # Streaming assistant conversation handler
     async def event_generator():
         config = {"configurable": {"thread_id": request.session_id}}
         

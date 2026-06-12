@@ -13,17 +13,18 @@ import {
 import { API_URL, DEFAULT_WORKSPACE_ID } from '../config';
 import { THEMES, getCommonStyles, ThemeType } from './Theme';
 
-export default function Settings({ userId, setUserId, theme, setTheme }: {
+export default function Settings({ userId, setUserId, theme, setTheme, activeTab }: {
   userId: string;
   setUserId: (id: string) => void;
   theme: ThemeType;
   setTheme: (theme: ThemeType) => void;
+  activeTab: string;
 }) {
   const colors = THEMES[theme];
   const commonStyles = getCommonStyles(colors);
   const styles = getStyles(colors);
 
-  // Shadows to make existing COMMON_STYLES and COLORS code work without changes
+  // Legacy references compatibility
   const COLORS = colors;
   const COMMON_STYLES = commonStyles;
 
@@ -128,8 +129,10 @@ export default function Settings({ userId, setUserId, theme, setTheme }: {
   };
 
   useEffect(() => {
-    fetchSettings();
-  }, [userId]);
+    if (activeTab === 'settings') {
+      fetchSettings();
+    }
+  }, [userId, activeTab]);
 
   const saveWorkspaceSettings = async () => {
     setSaving(true);

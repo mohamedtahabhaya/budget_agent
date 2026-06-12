@@ -54,9 +54,20 @@ export default function Chat({
   const timerRef = useRef<any>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const isPreparingRef = useRef<boolean>(false);
+  const webMediaRecorderRef = useRef<any>(null);
+  const webAudioChunksRef = useRef<any[]>([]);
 
   useEffect(() => {
     async function setupPermissions() {
+      if (Platform.OS === 'web') {
+        try {
+          const stream = await (navigator as any).mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track: any) => track.stop());
+        } catch (err) {
+          console.warn('Microphone permission denied on web:', err);
+        }
+        return;
+      }
       try {
         const { status } = await Audio.requestPermissionsAsync();
         if (status !== 'granted') {
@@ -73,9 +84,31 @@ export default function Chat({
   }, []);
 
   const startRecording = async () => {
-    if (recordingRef.current || isPreparingRef.current) return;
+    if (recordingRef.current || isPreparingRef.current || webMediaRecorderRef.current) return;
     isPreparingRef.current = true;
     try {
+      if (Platform.OS === 'web') {
+        const stream = await (navigator as any).mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new (window as any).MediaRecorder(stream);
+        webMediaRecorderRef.current = mediaRecorder;
+        webAudioChunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (event: any) => {
+          if (event.data.size > 0) {
+            webAudioChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+        setRecordDuration(0);
+
+        timerRef.current = setInterval(() => {
+          setRecordDuration(prev => prev + 1);
+        }, 1000);
+        return;
+      }
+
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -96,15 +129,56 @@ export default function Chat({
 
     } catch (err) {
       console.error('Failed to start recording:', err);
+      alert('Could not access microphone. Make sure permissions are granted.');
     } finally {
       isPreparingRef.current = false;
     }
   };
 
   const stopRecording = async () => {
+    setIsRecording(false);
+    if (timerRef.current) clearInterval(timerRef.current);
+
+    if (Platform.OS === 'web') {
+      const activeRecorder = webMediaRecorderRef.current;
+      if (!activeRecorder) return;
+
+      webMediaRecorderRef.current = null;
+      activeRecorder.onstop = async () => {
+        try {
+          const audioBlob = new Blob(webAudioChunksRef.current, { type: 'audio/m4a' });
+          if (audioBlob.size < 100) {
+            alert("Recording too short. Please press and hold to record.");
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Audio = (reader.result as string).split(',')[1];
+            const userMsgId = Date.now().toString();
+            setMessages(prev => [
+              ...prev,
+              { id: userMsgId, sender: 'user', text: '🎤 Voice Note', isAudio: true }
+            ]);
+            sendPayload({ audio_data: base64Audio });
+          };
+          reader.readAsDataURL(audioBlob);
+        } catch (err) {
+          console.error('Failed to process web audio blob:', err);
+        } finally {
+          if (activeRecorder.stream) {
+            activeRecorder.stream.getTracks().forEach((track: any) => track.stop());
+          }
+        }
+      };
+      
+      activeRecorder.stop();
+      return;
+    }
+
     let activeRecording = recordingRef.current;
 
-    // If it is currently preparing, wait up to 1 second for the recording object to be ready
+    // Wait for recording ready
     if (isPreparingRef.current) {
       for (let i = 0; i < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -116,13 +190,9 @@ export default function Chat({
     }
 
     if (!activeRecording) {
-      setIsRecording(false);
-      if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
 
-    setIsRecording(false);
-    if (timerRef.current) clearInterval(timerRef.current);
     recordingRef.current = null;
     setRecording(null);
 
@@ -131,12 +201,10 @@ export default function Chat({
       const uri = activeRecording.getURI();
 
       if (uri) {
-        // Read file as Base64
         const base64Audio = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        // Add user placeholder message
         const userMsgId = Date.now().toString();
         setMessages(prev => [
           ...prev,
@@ -255,7 +323,7 @@ export default function Chat({
         reader = response.body.getReader();
         decoder = new (global as any).TextDecoder();
       } catch (e) {
-        // Fallback for React Native Hermès engine where getReader/TextDecoder is missing
+        // Hermès streaming fallback
         try {
           const rawText = await response.text();
           const lines = rawText.split('\n');

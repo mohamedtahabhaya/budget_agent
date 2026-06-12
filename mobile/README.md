@@ -1,55 +1,48 @@
-# Budget Agent Mobile Client - React Native (Expo)
+# Budget Agent Mobile Client
 
-Cette application mobile est le client natif de l'Assistant Financier Multi-comptes (**Budget Agent**), conforme à 100% à la spécification produit. Elle est conçue sous forme de tableau de bord moderne sombre (dark mode) intégrant une interface de chat asynchrone avec l'intelligence artificielle, des fonctionnalités d'enregistrement de notes vocales (micro natif) et d'analyse visuelle de tickets de caisse (caméra native).
-
----
-
-## 📱 Structure de l'Application
-
-L'interface mobile est découpée en 3 onglets principaux (bottom tab navigation) :
-1. **Dashboard (📊)** : Affiche en temps réel le solde consolidé (MAD/devises), les cartes des différents comptes bancaires, les jauges de progression des objectifs d'épargne, les alertes de budgets critiques et le journal des transactions récentes.
-2. **Assistant Chat (💬)** : Une interface de discussion fluide et progressive (streaming token par token) avec l'agent IA, prenant en charge le texte, les photos de tickets de caisse (vision) et l'enregistrement de notes vocales (whisper).
-3. **Settings (⚙️)** : Permet d'administrer l'espace de travail (nom, devise de référence, modèle de répartition avec grille de splits sur-mesure), d'ajuster les plafonds de budgets mensuels par catégorie, de gérer le cycle de vie des comptes (création, archivage) et de piloter les canaux de notifications de l'utilisateur.
+A React Native mobile client built with **Expo** and styled in dark mode. It interfaces with the FastAPI backend to display balances, transactions, and settings, and provides an AI Chat dashboard that supports text, voice recordings, and receipt uploads.
 
 ---
 
-## 🚀 Lancement du Client Mobile
+## 📱 Project Structure
 
-Pour démarrer et tester l'application mobile locale :
+The client includes 3 primary tabs:
+1. **Dashboard**: Live consolidation cards (MAD/currencies), budget limits tracking, savings goal progress, recent transaction history, and real-time SSE budget notifications.
+2. **Chat**: Interface with the LangGraph financial advisor. Supports token streaming, receipt analysis (Vision), and voice notes (Whisper).
+3. **Settings**: Configuration panels for the workspace (naming, reference currency, equal/proportional/custom split rules), category monthly budget limits, account management (creation, rename, archive), and notification toggles.
 
-### 1. Prérequis
-Assurez-vous que votre serveur backend FastAPI est démarré et écoute sur le port `8000`.
+---
 
-### 2. Démarrage du serveur de développement Expo
-Ouvrez votre terminal et naviguez dans le sous-dossier `mobile` :
+## 🚀 Setup & Launch
+
+### 1. Install Dependencies
+Navigate to the `mobile` directory and install the packages:
 ```bash
 cd mobile
+npm install
+```
+
+### 2. Configure Backend API Endpoint
+Open [mobile/config.ts](file:///Users/mohamed-taha/Documents/budget_agent/mobile/config.ts) and set the `API_BASE_URL` to match your environment:
+- **Web Browser testing**: Use `http://localhost:8000`.
+- **Physical Device (Expo Go)**: Use your computer's local IP address (e.g., `http://192.168.1.50:8000`).
+
+---
+
+## 🧪 Running the App
+
+### Web Mode (Recommended for quick testing)
+Start the app in your browser:
+```bash
+npm run web
+```
+*Note: Web browser uploads for receipt image capture are supported. Standard browser APIs are used to read file blobs, bypassing mobile-only `expo-file-system` limitations.*
+
+### Mobile Device Mode (iOS / Android)
+Start the Expo packager:
+```bash
 npm start
 ```
-Cela va lancer le serveur de développement Expo et afficher un **QR Code** dans votre terminal.
-
----
-
-## 🧪 Tester sur votre Téléphone (Recommandé)
-
-Grâce à **Expo Go**, vous n'avez pas besoin d'installer Xcode ou Android Studio pour voir l'application tourner sur un appareil physique :
-
-1. Téléchargez l'application gratuite **Expo Go** sur votre smartphone :
-   * [App Store (iOS)](https://apps.apple.com/fr/app/expo-go/id984021056)
-   * [Google Play Store (Android)](https://play.google.com/store/apps/details?id=host.exp.exponent)
-2. Connectez votre ordinateur et votre téléphone sur le **même réseau Wi-Fi**.
-3. **Ajustez l'adresse API** : 
-   Ouvrez le fichier [mobile/config.ts](file:///Users/mohamed-taha/Documents/budget_agent/mobile/config.ts) et remplacez `http://localhost:8000` par l'adresse IP locale de votre ordinateur (ex: `http://192.168.1.50:8000`) afin que votre smartphone puisse joindre l'API de votre ordinateur sur le réseau Wi-Fi.
-4. Scannez le QR Code affiché dans votre terminal avec l'appareil photo de votre smartphone (ou l'application Expo Go sur Android).
-5. L'application mobile se charge et s'affiche instantanément sur votre téléphone !
-
----
-
-## 🖥️ Tester sur un Émulateur (iOS / Android)
-
-Si vous avez installé Xcode (sur macOS) ou Android Studio :
-
-* **Pour iOS (Simulateur Mac)** :
-  Appuyez sur `i` dans le terminal après avoir lancé `npm start`.
-* **Pour Android (Émulateur)** :
-  Appuyez sur `a` dans le terminal. (L'application est configurée pour mapper automatiquement localhost vers `http://10.0.2.2:8000` pour Android).
+1. Install **Expo Go** on your device.
+2. Ensure your phone and computer are on the **same Wi-Fi network**.
+3. Scan the QR code displayed in the terminal to load the application.

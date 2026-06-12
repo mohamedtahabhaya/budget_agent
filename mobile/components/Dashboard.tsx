@@ -18,12 +18,14 @@ export default function Dashboard({
   userId,
   theme,
   displayCurrency,
-  setDisplayCurrency
+  setDisplayCurrency,
+  activeTab
 }: {
   userId: string;
   theme: ThemeType;
   displayCurrency: string;
   setDisplayCurrency: (curr: string) => void;
+  activeTab: string;
 }) {
   const colors = THEMES[theme];
   const commonStyles = getCommonStyles(colors);
@@ -89,8 +91,10 @@ export default function Dashboard({
   };
 
   useEffect(() => {
-    fetchData();
-  }, [userId]); // Refresh data when switching active profiles
+    if (activeTab === 'dashboard') {
+      fetchData();
+    }
+  }, [userId, activeTab]); // Refresh data when switching active profiles or entering dashboard
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -137,15 +141,14 @@ export default function Dashboard({
     );
   }
 
-  // Calculate totals in the selected display currency
-  // 1. Privacy Filter: Only show accounts belonging to active user or shared
+  // Filter by privacy
   const allowedAccounts = accounts.filter(a => 
     a.type.includes('shared') || 
     a.owner_user_id === userId || 
     !a.owner_user_id
   );
 
-  // 2. View Mode Filter: personal / shared / all
+  // Filter by view mode
   const filteredAccounts = allowedAccounts.filter(a => {
     if (viewMode === 'personal') {
       return a.owner_user_id === userId && !a.type.includes('shared');
@@ -155,7 +158,7 @@ export default function Dashboard({
     return true; // 'all'
   });
 
-  // Calculate totals in the selected display currency for filtered accounts
+  // Sum balances
   const totalBalanceConverted = filteredAccounts.reduce((sum, a) => {
     const converted = convertAmount(a.balance, a.currency || 'MAD', displayCurrency);
     return sum + converted;
@@ -168,22 +171,22 @@ export default function Dashboard({
     return filteredAccounts.some(fa => fa.id === acc.id);
   });
 
-  // Filter savings goals based on visible accounts and user permissions
+  // Filter savings goals
   const visibleGoals = goals.filter(g => {
-    // If the goal is linked to an account, we must check if that account is allowed for this user
+    // Check linked account permission
     if (g.account_id) {
       const isAllowed = allowedAccounts.some(a => a.id === g.account_id);
       if (!isAllowed) return false;
     }
 
     if (viewMode === 'personal') {
-      if (!g.account_id) return false; // Hide unlinked/shared goals in personal view
+      if (!g.account_id) return false; // Hide unlinked goals
       return filteredAccounts.some(a => a.id === g.account_id);
     } else if (viewMode === 'shared') {
-      if (!g.account_id) return true; // Show unlinked/shared goals in joint view
+      if (!g.account_id) return true; // Show unlinked goals
       return filteredAccounts.some(a => a.id === g.account_id);
     }
-    return true; // Show all in 'all' mode
+    return true; // Show all
   });
 
   const getGreetingName = () => {

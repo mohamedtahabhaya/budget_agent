@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   StatusBar,
   Keyboard,
-  Platform
+  Platform,
+  ScrollView,
+  Dimensions
 } from 'react-native';
 import { THEMES, ThemeType } from './components/Theme';
 import { API_URL } from './config';
@@ -32,6 +34,55 @@ export default function App() {
     }
   ]);
   const [hasUnread, setHasUnread] = useState(false);
+
+  const [containerWidth, setContainerWidth] = useState(Dimensions.get('window').width);
+  const scrollViewRef = useRef<ScrollView>(null);
+  const isProgrammaticScroll = useRef(false);
+  const isSwiping = useRef(false);
+  const TABS: Tab[] = ['dashboard', 'chat', 'notifications', 'settings'];
+
+  const handleTabPress = (tab: Tab) => {
+    setActiveTab(tab);
+    isProgrammaticScroll.current = true;
+    isSwiping.current = false;
+    const index = TABS.indexOf(tab);
+    scrollViewRef.current?.scrollTo({ x: index * containerWidth, animated: true });
+    
+    // Reset programmatic flag after scroll animation finishes
+    setTimeout(() => {
+      isProgrammaticScroll.current = false;
+    }, 350);
+  };
+
+  const handleScroll = (event: any) => {
+    // Prevent layout-induced scroll jumps on native platforms when not swiping
+    if (Platform.OS !== 'web' && !isSwiping.current) return;
+    if (isProgrammaticScroll.current) return;
+    
+    const contentOffset = event.nativeEvent.contentOffset.x;
+    const index = Math.round(contentOffset / containerWidth);
+    if (index >= 0 && index < TABS.length) {
+      const tab = TABS[index];
+      if (tab !== activeTab) {
+        setActiveTab(tab);
+        if (tab === 'notifications') {
+          markAllAsRead();
+        }
+      }
+    }
+  };
+
+  const handleLayout = (event: any) => {
+    const { width } = event.nativeEvent.layout;
+    if (width > 0 && width !== containerWidth) {
+      setContainerWidth(width);
+    }
+  };
+
+  useEffect(() => {
+    const index = TABS.indexOf(activeTab);
+    scrollViewRef.current?.scrollTo({ x: index * containerWidth, animated: false });
+  }, [containerWidth]);
 
   const checkUnreadNotifications = async () => {
     try {
@@ -79,54 +130,6 @@ export default function App() {
 
   const colors = THEMES[themeMode];
 
-  const renderContent = () => {
-    switch (activeTab) {
-      case 'dashboard':
-        return (
-          <Dashboard
-            userId={userId}
-            theme={themeMode}
-            displayCurrency={displayCurrency}
-            setDisplayCurrency={setDisplayCurrency}
-          />
-        );
-      case 'chat':
-        return (
-          <Chat
-            userId={userId}
-            theme={themeMode}
-            messages={chatMessages}
-            setMessages={setChatMessages}
-          />
-        );
-      case 'notifications':
-        return (
-          <Notifications
-            userId={userId}
-            theme={themeMode}
-          />
-        );
-      case 'settings':
-        return (
-          <Settings
-            userId={userId}
-            setUserId={setUserId}
-            theme={themeMode}
-            setTheme={setThemeMode}
-          />
-        );
-      default:
-        return (
-          <Dashboard
-            userId={userId}
-            theme={themeMode}
-            displayCurrency={displayCurrency}
-            setDisplayCurrency={setDisplayCurrency}
-          />
-        );
-    }
-  };
-
   // Dynamic header status
   const getActiveUserName = () => {
     return userId === 'user_mohamed' ? 'Mohamed' : 'Taha';
@@ -150,9 +153,55 @@ export default function App() {
         </View>
       </View>
 
-      {/* ACTIVE SCREEN CONTENT */}
-      <View style={styles.content}>
-        {renderContent()}
+      {/* ACTIVE SCREEN CONTENT (Horizontal swipeable slide) */}
+      <View style={styles.content} onLayout={handleLayout}>
+        <ScrollView
+          ref={scrollViewRef}
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={handleScroll}
+          onScrollBeginDrag={() => { isSwiping.current = true; isProgrammaticScroll.current = false; }}
+          onMomentumScrollBegin={() => { isSwiping.current = true; }}
+          onMomentumScrollEnd={() => { isSwiping.current = false; }}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ width: containerWidth * 4, height: '100%' }}
+        >
+          <View style={{ width: containerWidth, height: '100%' }}>
+            <Dashboard
+              userId={userId}
+              theme={themeMode}
+              displayCurrency={displayCurrency}
+              setDisplayCurrency={setDisplayCurrency}
+              activeTab={activeTab}
+            />
+          </View>
+          <View style={{ width: containerWidth, height: '100%' }}>
+            <Chat
+              userId={userId}
+              theme={themeMode}
+              messages={chatMessages}
+              setMessages={setChatMessages}
+            />
+          </View>
+          <View style={{ width: containerWidth, height: '100%' }}>
+            <Notifications
+              userId={userId}
+              theme={themeMode}
+              activeTab={activeTab}
+            />
+          </View>
+          <View style={{ width: containerWidth, height: '100%' }}>
+            <Settings
+              userId={userId}
+              setUserId={setUserId}
+              theme={themeMode}
+              setTheme={setThemeMode}
+              activeTab={activeTab}
+            />
+          </View>
+        </ScrollView>
       </View>
 
       {/* BOTTOM TAB NAVIGATION BAR */}
@@ -160,7 +209,7 @@ export default function App() {
         <View style={[styles.tabBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'dashboard' && { borderTopColor: colors.primary, borderTopWidth: 2 }]}
-            onPress={() => setActiveTab('dashboard')}
+            onPress={() => handleTabPress('dashboard')}
           >
             <Text style={styles.tabIcon}>📊</Text>
             <Text style={[styles.tabLabel, { color: activeTab === 'dashboard' ? colors.primary : colors.textMuted, fontWeight: activeTab === 'dashboard' ? 'bold' : '500' }]}>
@@ -170,7 +219,7 @@ export default function App() {
 
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'chat' && { borderTopColor: colors.primary, borderTopWidth: 2 }]}
-            onPress={() => setActiveTab('chat')}
+            onPress={() => handleTabPress('chat')}
           >
             <Text style={styles.tabIcon}>💬</Text>
             <Text style={[styles.tabLabel, { color: activeTab === 'chat' ? colors.primary : colors.textMuted, fontWeight: activeTab === 'chat' ? 'bold' : '500' }]}>
@@ -181,7 +230,7 @@ export default function App() {
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'notifications' && { borderTopColor: colors.primary, borderTopWidth: 2 }]}
             onPress={() => {
-              setActiveTab('notifications');
+              handleTabPress('notifications');
               markAllAsRead();
             }}
           >
@@ -196,7 +245,7 @@ export default function App() {
 
           <TouchableOpacity
             style={[styles.tabItem, activeTab === 'settings' && { borderTopColor: colors.primary, borderTopWidth: 2 }]}
-            onPress={() => setActiveTab('settings')}
+            onPress={() => handleTabPress('settings')}
           >
             <Text style={styles.tabIcon}>⚙️</Text>
             <Text style={[styles.tabLabel, { color: activeTab === 'settings' ? colors.primary : colors.textMuted, fontWeight: activeTab === 'settings' ? 'bold' : '500' }]}>

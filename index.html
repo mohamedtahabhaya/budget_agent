@@ -53,8 +53,23 @@
             display: flex;
             flex-direction: column;
             gap: 25px;
-            overflow-y: auto;
+            overflow: hidden;
             border-right: 1px solid var(--border-color);
+        }
+
+        .tabs-viewport {
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+            position: relative;
+            width: 100%;
+        }
+
+        .tabs-slider {
+            display: flex;
+            width: 200%;
+            height: 100%;
+            transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .panel-header {
@@ -361,9 +376,13 @@
         }
 
         .tab-content {
+            width: 50%;
+            height: 100%;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
             gap: 25px;
+            padding-right: 8px;
         }
 
         .hidden {
@@ -784,7 +803,7 @@
         
         async function fetchAccounts() {
             try {
-                const response = await fetch("http://127.0.0.1:8000/accounts");
+                const response = await fetch("/accounts");
                 const accounts = await response.json();
                 
                 const grid = document.getElementById("accounts-grid");
@@ -814,7 +833,7 @@
 
         async function fetchSavingsGoals() {
             try {
-                const response = await fetch("http://127.0.0.1:8000/savings-goals");
+                const response = await fetch("/savings-goals");
                 const goals = await response.json();
                 
                 const grid = document.getElementById("goals-grid");
@@ -852,7 +871,7 @@
 
         async function fetchNotifications() {
             try {
-                const response = await fetch("http://127.0.0.1:8000/notifications");
+                const response = await fetch("/notifications");
                 const notifications = await response.json();
                 
                 const list = document.getElementById("alerts-list");
@@ -885,7 +904,7 @@
 
         async function fetchPreferences() {
             try {
-                const response = await fetch(`http://127.0.0.1:8000/preferences/${activeUserId}`);
+                const response = await fetch(`/preferences/${activeUserId}`);
                 const prefs = await response.json();
                 if (prefs.error) return;
                 
@@ -907,7 +926,7 @@
             try {
                 const body = {};
                 body[prefName] = value;
-                await fetch(`http://127.0.0.1:8000/preferences/${activeUserId}`, {
+                await fetch(`/preferences/${activeUserId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify(body)
@@ -931,7 +950,7 @@
 
         async function fetchTransactions() {
             try {
-                const response = await fetch("http://127.0.0.1:8000/transactions?limit=10");
+                const response = await fetch("/transactions?limit=10");
                 const transactions = await response.json();
                 
                 const container = document.getElementById("dashboard-transactions-container");
@@ -978,7 +997,7 @@
 
         async function fetchBudgetLimits() {
             try {
-                const response = await fetch("http://127.0.0.1:8000/budgets");
+                const response = await fetch("/budgets");
                 const budgets = await response.json();
                 
                 const container = document.getElementById("settings-budgets-container");
@@ -1030,7 +1049,7 @@
 
         async function saveBudgetLimit(categoryId, monthlyCap) {
             try {
-                const response = await fetch("http://127.0.0.1:8000/budgets", {
+                const response = await fetch("/budgets", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1054,7 +1073,7 @@
 
         async function fetchWorkspaceSettings() {
             try {
-                const response = await fetch(`http://127.0.0.1:8000/workspace/${activeWorkspaceId}`);
+                const response = await fetch(`/workspace/${activeWorkspaceId}`);
                 const data = await response.json();
                 if (data.error) {
                     console.error("Error fetching workspace details:", data.error);
@@ -1146,7 +1165,7 @@
                     }
                 }
                 
-                const response = await fetch(`http://127.0.0.1:8000/workspace/${activeWorkspaceId}`, {
+                const response = await fetch(`/workspace/${activeWorkspaceId}`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1174,7 +1193,7 @@
 
         async function fetchManageAccounts() {
             try {
-                const response = await fetch(`http://127.0.0.1:8000/accounts?workspace_id=${activeWorkspaceId}`);
+                const response = await fetch(`/accounts?workspace_id=${activeWorkspaceId}`);
                 const accounts = await response.json();
                 
                 const container = document.getElementById("settings-accounts-list-container");
@@ -1233,7 +1252,7 @@
             if (trimmed === currentName) return;
             
             try {
-                const response = await fetch(`http://127.0.0.1:8000/accounts/${slug}/rename`, {
+                const response = await fetch(`/accounts/${slug}/rename`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1261,7 +1280,7 @@
             if (!confirmed) return;
             
             try {
-                const response = await fetch(`http://127.0.0.1:8000/accounts/${slug}/archive?workspace_id=${activeWorkspaceId}`, {
+                const response = await fetch(`/accounts/${slug}/archive?workspace_id=${activeWorkspaceId}`, {
                     method: "POST"
                 });
                 const resData = await response.json();
@@ -1300,7 +1319,7 @@
                     return;
                 }
                 
-                const response = await fetch("http://127.0.0.1:8000/accounts/create", {
+                const response = await fetch("/accounts/create", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1346,18 +1365,22 @@
             const tabSettings = document.getElementById("tab-settings");
 
             if (tabDashboardBtn && tabSettingsBtn && tabDashboard && tabSettings) {
+                const tabsSlider = document.getElementById("tabs-slider");
+                
+                // Ensure hidden class is removed from both at start so they render side-by-side
+                tabDashboard.classList.remove("hidden");
+                tabSettings.classList.remove("hidden");
+
                 tabDashboardBtn.addEventListener("click", () => {
                     tabDashboardBtn.classList.add("active");
                     tabSettingsBtn.classList.remove("active");
-                    tabDashboard.classList.remove("hidden");
-                    tabSettings.classList.add("hidden");
+                    if (tabsSlider) tabsSlider.style.transform = "translateX(0)";
                 });
 
                 tabSettingsBtn.addEventListener("click", () => {
                     tabSettingsBtn.classList.add("active");
                     tabDashboardBtn.classList.remove("active");
-                    tabSettings.classList.remove("hidden");
-                    tabDashboard.classList.add("hidden");
+                    if (tabsSlider) tabsSlider.style.transform = "translateX(-50%)";
                     
                     fetchWorkspaceSettings();
                     fetchManageAccounts();
@@ -1518,7 +1541,7 @@
             loadingDots.style.display = "block";
 
             try {
-                const response = await fetch("http://127.0.0.1:8000/chat", {
+                const response = await fetch("/chat", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -1744,8 +1767,10 @@
             <button class="nav-tab" id="tab-settings-btn">⚙️ Settings</button>
         </div>
 
-        <!-- DASHBOARD TAB CONTENT -->
-        <div class="tab-content" id="tab-dashboard">
+        <div class="tabs-viewport">
+            <div class="tabs-slider" id="tabs-slider">
+                <!-- DASHBOARD TAB CONTENT -->
+                <div class="tab-content" id="tab-dashboard">
             <!-- ACCOUNTS BALANCE WIDGET -->
             <div class="widget-section">
                 <div class="section-title">
@@ -1836,8 +1861,8 @@
             </div>
         </div>
 
-        <!-- SETTINGS TAB CONTENT -->
-        <div class="tab-content hidden" id="tab-settings">
+                <!-- SETTINGS TAB CONTENT -->
+                <div class="tab-content" id="tab-settings">
             <!-- WORKSPACE CONFIG -->
             <div class="widget-section">
                 <div class="section-title">
@@ -1939,6 +1964,8 @@
                 <div class="settings-card" id="settings-budgets-container">
                     <div style="color: var(--text-muted); font-size: 0.9em;">Loading budget limits...</div>
                 </div>
+            </div>
+            </div>
             </div>
         </div>
     </div>
